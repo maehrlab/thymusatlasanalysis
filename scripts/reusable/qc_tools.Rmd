@@ -1,0 +1,111 @@
+---
+title: "Thymus basic analysis"
+author: "Eric Kernfeld"
+date: "September 13, 2016"
+output: html_document
+---
+
+
+```{r}
+
+###Basic QC
+
+```{r}
+
+#' Assemble very basic summary stats: total UMIs, genes, and cells.
+#'
+#' @export
+#'
+save_depth_stats = function(results_path, samples = NULL, metadata = get_metadata()) {
+  metadata %<>% subset( files_available == "yes" )
+  if(!is.null( samples )){
+    metadata %<>% subset( Sample_ID %in% samples )
+  }
+  all_runs = metadata$Sample_ID %>% as.list
+  names( all_runs ) = all_runs
+  get1 = function(sample) load_thymus_profiling_data(sample)[[1]]
+  dimsum = function(X) c(dim(X), sum(X))
+  basic_stats = data.frame( Reduce( rbind, lapply( all_runs, function(s) {dimsum( get1( s ) )} ) ) )
+  colnames(basic_stats) = c( "transcripts", "cells", "UMIs" )
+  rownames(basic_stats) = basic_stats$Sample_ID = unlist(all_runs)
+  write.table( basic_stats, file = file.path( results_path, "basics_stats.txt" ),
+               quote = F, row.names = F, col.names = T, sep = "\t")
+  return(basic_stats)
+}
+
+#' Screen for female embryos using simple stats.
+#'
+#' @export
+#'
+check_xist_all = function( results_path, samples = NULL, metadata = get_metadata() ){
+  if(!is.null(samples)){
+    metadata %<>% subset( Sample_ID %in% samples )
+  }
+  # # Load the data; check for xist versus y chromosome genes
+  all_runs = subset(metadata, files_available == "yes", select = "Sample_ID", drop = T) 
+  for( rep_name in all_runs ){
+    thymusatlastools::check_xist_pure( raw_dge = load_thymus_profiling_data( sample_ids = rep_name, test_mode = F )[[1]], 
+                                       rep_name = rep_name, 
+                                       results_path = file.path( results_path, "Xist_check" ) ) 
+  }
+}
+
+# # This function checks for consistency across replicates as returned by `get_data_by_replicates`.
+# # It plots avg expression for each gene and proportion expressing each gene.
+scatterplot_replicates = function( results_path, data_by_replicate = get_data_by_replicates() ){
+  for( sample_type in names( data_by_replicate ) ){
+    sample_ids = data_by_replicate[[sample_type]]
+    reps = load_thymus_profiling_data( sample_ids = sample_ids )
+    all_genes = Reduce( x = lapply( reps, rownames ),f = union )
+    # Initialize empty arrays
+    mean_expr_by_gene = as.data.frame( matrix( 0, ncol = length( sample_ids ), nrow = length( all_genes ) ) )
+    colnames( mean_expr_by_gene ) = sample_ids
+    rownames( mean_expr_by_gene ) = all_genes
+    prop_expr_by_gene = mean_expr_by_gene
+    # Plot expression by gene both as log1p mean expression and proportion expressing.
+    for( rep_id in sample_ids ){
+      mean_expr_by_gene[ rownames(reps[[rep_id]]), rep_id ] = rowMeans( log1p( reps[[rep_id]]   ) )
+      prop_expr_by_gene[ rownames(reps[[rep_id]]), rep_id ] = rowMeans(        reps[[rep_id]] > 0 ) 
+    }
+    dir.create.nice( file.path( results_path, "rep_check_total" ) )
+    pdf( file.path( results_path, "rep_check_total", paste0( sample_type, ".pdf" ) ) ) 
+    {
+      plot_pairs( mean_expr_by_gene, main = "Total expression by gene" )
+    } 
+    dev.off()
+    
+    dir.create.nice( file.path( results_path, "rep_check_prop" ) )
+    pdf( file.path( results_path, "rep_check_prop", paste0( sample_type, ".pdf" ) ) ) 
+    {
+      plot_pairs( prop_expr_by_gene, main = "Proportion expressing each gene" )
+    } 
+    dev.off()
+    
+  }
+}
+
+
+# # Given a matrix, scatterplots all pairs of columns.
+#' 
+plot_pairs = function( X, main = "" ){
+  D = ncol( X )
+  for( ii in 1:D ){
+    for( jj in 1:ii ){
+      # linear_index = (ii - 1)*D + jj
+      if( ii == jj ){
+        # could do histogram here, but I don't want to
+      } else {
+        Y = data.frame( X[[ii]], X[[jj]], rownames( X ) )
+        colnames( Y ) = c( colnames( X )[ c(ii, jj) ], "gene" )
+        r = cor(Y[, 1], Y[, 2])
+        p =  ggplot( Y ) + ggtitle( paste0( main, " (r = ", round(r, 2), ")" ) ) + 
+          geom_point( aes_string( x = colnames(Y)[[1]], y = colnames(Y)[[2]] )) 
+        print( p ) 
+      }
+    }
+  }
+}
+
+
+```
+```

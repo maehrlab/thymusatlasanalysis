@@ -1,0 +1,19 @@
+---
+title: "Thymus basic analysis"
+author: "Eric Kernfeld"
+date: "September 13, 2016"
+output: html_document
+---
+
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+samples = c("Rorc_KO_WholeThy_rep1",
+            "Rorc_KO_WholeThy_rep2",
+            "Rorc_Het_WholeThy_rep1",
+            "Rorc_Het_WholeThy_rep2")
+check_all_scRNA( results_path, samples )
+save_depth_stats( results_path, samples )
+
+```
+                 

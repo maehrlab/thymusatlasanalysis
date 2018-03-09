@@ -1,0 +1,80 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+# # Retrieve Seurat labeled obj 
+dge = inventory_get( tag = "overview_explore" ) %>% readRDS
+p = faceted_tsne( dge, results_path )
+p = p + scale_color_manual(values = c(extended_eday_colors, "all" = "grey"))
+ggsave(file.path(results_path, "tsne_samples_facet.pdf"), p, width = 20, height = 8)
+```
+
+Visualize nUMI, nGene by day
+
+```{r}
+X = aggregate_nice( FetchData( dge,"nUMI"),
+                    FetchData( dge,"orig.ident"),
+                    median )
+max(X)
+min(X)
+
+p = dge %>% 
+  VlnPlot("nUMI", group.by = "eday", cols.use = extended_eday_colors, size.use = 0.1, y.log = T, do.ret = T) %>%
+  extract2(1) %>% 
+  add(scale_y_continuous(breaks = 1000*c(1, 2, 3, 4, 6, 8, 12, 16, 20), trans = "log10")) %>%
+  add(theme(axis.text.y = element_text(angle = 0))) 
+p$layers[[2]] = NULL
+ggsave(plot=p, file.path(results_path, "nUMI_by_day.pdf"), width = 3, height = 3)
+
+p = dge %>% SubsetDataFlex("ident", "ident %in% paste0('BLD', 1:6)") %>%
+  VlnPlot("nUMI", group.by = "eday", cols.use = extended_eday_colors, size.use = 0.1, y.log = T, do.ret = T) %>%
+  extract2(1) %>% 
+  add(scale_y_continuous(breaks = 1000*c(1, 2, 3, 4, 6, 8, 12, 16, 20), trans = "log10")) %>%
+  add(theme(axis.text.y = element_text(angle = 0))) 
+p$layers[[2]] = NULL
+ggsave(plot=p, file.path(results_path, "nUMI_by_day_blood_only.pdf"), width = 3, height = 3)
+
+
+p = dge %>% SubsetDataFlex("ident", "ident %in% paste0('TEC', 1:3)") %>%
+  VlnPlot("nUMI", group.by = "eday", cols.use = extended_eday_colors, size.use = 0.1, y.log = T, do.ret = T) %>%
+  extract2(1) %>% 
+  add(scale_y_continuous(breaks = 1000*c(1, 2, 3, 4, 6, 8, 12, 16, 20), trans = "log10")) %>%
+  add(theme(axis.text.y = element_text(angle = 0))) 
+p$layers[[2]] = NULL
+ggsave(plot=p, file.path(results_path, "nUMI_by_day_TEC_only.pdf"), width = 3, height = 3)
+```
+
+#### Study Rp genes
+
+```{r}
+
+dge %<>% add_rp_percentage
+dge@data.info$log10_nUMI = dge@data.info$nUMI %>% log10
+save_feature_plots( dge, results_path,
+                    gene_list = c( "ribo_nUMI_pct", "nUMI", "log10_nUMI", "nGene"), 
+                    gene_list_name = "qc")
+a = VlnPlot( dge, "ribo_nUMI_pct", group.by = "orig.ident", do.ret = T )[[1]]
+a$layers[[2]] = NULL
+ggsave( filename = file.path( results_path, "Ribo_content_by_sample.pdf"), plot = a )
+
+
+a = VlnPlot(dge, "ribo_nUMI_pct", group.by = "ident", do.ret = T )[[1]]
+a$layers[[2]] = NULL
+ggsave( filename = file.path( results_path, "Ribo_content_by_cell_type.pdf"), plot = a )
+
+faceted_tsne( dge, results_path, colour = "ribo_nUMI_pct" )
+
+p = ggplot( FetchData(dge, c("nUMI", "ribo_nUMI_pct", "orig.ident")), 
+            aes(x = nUMI, y = ribo_nUMI_pct)) + 
+  stat_density2d(aes(fill=..density..), geom="tile", contour=FALSE) +
+  scale_fill_gradient2(low="#ffffff", mid="#cccccc", high="#000000")  +  scale_x_log10()  + 
+  geom_smooth(method = lm, aes(colour=orig.ident), se = F)
+ggsave( filename = file.path( results_path, "Ribo_content_by_nUMI.pdf"), plot = p )
+
+```

@@ -1,0 +1,211 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+#### Set up data and metadata/classifier labels
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+dge_all  = inventory_get( tag = "dge_Rag1null_plus_atlas_whole_16_5" ) %>% readRDS
+dge_all %<>% add_maehrlab_metadata("eday")
+```
+
+#### Plot cell-type proportions
+
+```{r}
+{
+  pdf(file.path(results_path, "blood_subtype_ratios.pdf"))
+  layout(matrix(c(1, 2), ncol = 1))
+  dge_all  %>% 
+    SubsetDataFlex(vars.use = "genotype", predicate = "genotype == 'wt'") %>%
+    FetchData("cell_type") %>% 
+    table %>% extract(paste0("BLD", c(1, 2, 3))) %>% 
+    percentify %>% barplot(main="Atlas (wt) e16.5", ylim=c(0, 100))
+  dge_all %>% 
+    SubsetDataFlex(vars.use = "genotype", predicate = "genotype == 'Rag1null'") %>%
+    FetchData("cell_type") %>% 
+    table %>% extract(paste0("BLD", c(1, 2, 3))) %>% 
+    percentify %>% barplot(main="Rag1 -/- e16.5", ylim=c(0, 100))
+  dev.off()
+}
+```
+
+#### Make a FACS-style plot of CD25 and CD44
+
+```{r}
+dge_all@data.info$genotype %<>% factor(levels = c("wt", "Rag1null"), ordered = T)
+dge_tcell = SubsetDataFlex( dge_all, 
+                            vars.use = "cell_type", 
+                            predicate = "cell_type %in% paste0('BLD', 1:3)" ); rm(dge_all); gc()
+dge_tcell = TACS(dge = dge_tcell, gene1 = "Il2ra", gene2 = "Cd44",
+                 facet_by = "genotype", 
+                 return_val = "seurat" )
+cutoff_CD25 = 1.1
+cutoff_CD44 = 0.5
+p_TACS_thymocyte = TACS(dge = dge_tcell, gene1 = "Il2ra", gene2 = "Cd44",
+                        facet_by = "genotype", 
+                        cutoffs = c( cutoff_CD25, cutoff_CD44 ),
+                        density = T ) + 
+  scale_color_manual(values = RAG_WT_COLORS)
+ggsave( file.path(results_path, "TACS_DN_thymocyte.pdf"), p_TACS_thymocyte, width = 9, height = 4)
+X = dge_tcell %>% FetchData(c("genotype", "Il2ra_score", "Cd44_score"))
+X$Il2ra_score %<>% is_greater_than(cutoff_CD25)
+X$Cd44_score %<>% is_greater_than(cutoff_CD44)
+colnames(X)[2:3] = c("Il2ra_hi", "Cd44_hi")
+X_counts = table(X) %>% apply(1, c)
+{
+  sink(file.path(results_path, "fisher_test_tcell.txt"))
+  fisher.test( X_counts, workspace = 20000000 ) %>% print
+  sink()
+}
+write.table(table(X) %>% as.data.frame(), file.path(results_path, "Tcell_counts.txt"), quote = F)
+
+# Just wanna see this out of curiosity
+p = TACS(dge = dge_tcell, gene1 = "Il2ra", gene2 = "Cd44",
+         facet_by = "cell_type", 
+         cutoffs = c( cutoff_CD25, cutoff_CD44 ),
+         density = T )
+ggsave( file.path(results_path, "thymocyte_TACS_by_cluster.pdf"), p, width = 12)
+```
+
+
+#### Comparison at Cd44lo_Cd25hi stage 
+
+```{r}
+dge_Cd44lo_Cd25hi = SubsetDataFlex( dge_tcell, 
+                           vars.use = c("Cd44_score", "Il2ra_score"), 
+                           predicate = " Cd44_score < cutoff_CD44 & cutoff_CD25 < Il2ra_score  " )
+
+de_genes_Cd44lo_Cd25hi = FindMarkersFlex( object = dge_Cd44lo_Cd25hi,
+                                          ident.use = "genotype",
+                                          ident.1 = "Rag1null", 
+                                          ident.2 = "wt" )
+
+save_marker_table( de_genes_Cd44lo_Cd25hi, results_path, testname = "Rag1null_Cd44lo_Cd25hi", remove_rp = TRUE, add_to_inventory = FALSE )
+de_genes_Cd44lo_Cd25hi_bak = de_genes_Cd44lo_Cd25hi
+de_genes_Cd44lo_Cd25hi %<>% subset( !is_rp(gene) )
+
+do_enrichr( geneset = de_genes_Cd44lo_Cd25hi %>% subset(avg_diff > 0 & q.value < 0.1, select = "gene", drop = T), 
+            results_path = results_path, geneset_name = "Cd44lo_Cd25hi_Rag1_up" )
+do_enrichr( geneset = de_genes_Cd44lo_Cd25hi %>% subset(avg_diff < 0 & q.value < 0.1, select = "gene", drop = T), 
+            results_path = results_path, geneset_name = "Cd44lo_Cd25hi_Rag1_dn" )
+
+Cd44lo_Cd25hi_heatmap_data_driven = make_heatmap_for_table( dge_Cd44lo_Cd25hi, 
+                                                   genes_in_order = c(
+                                                     de_genes_Cd44lo_Cd25hi$gene %>% head(20), 
+                                                     de_genes_Cd44lo_Cd25hi$gene %>% tail(20) ),
+                                                   desired_cluster_order = c("wt", "Rag1"),
+                                                   ident.use = "genotype" )
+ggsave(file.path(results_path, "Cd44lo_Cd25hi_heatmap_data_driven.pdf"), Cd44lo_Cd25hi_heatmap_data_driven)
+
+beta_selection_genes = c( "Cd3g","Cd3d","Cd3e", "Cd247",
+                          "Ptcra", "TRB_TOTAL", "Rorc",
+                           "Fyn", "Myc", "Csk", "Tcf3", 
+                          "Lat", "Lcp2", "Zap70", "Plcg1", "Prkca",
+                          "Lck", "Hras", "Raf1", "Vav1", "Egr1", "Nfkb1",
+                          paste0("Id", 1:4), 
+                          "IG1.S", "S", "G2.M", "M", "M.G1", 
+                          "Cdk4", "Cdk6", "Ccnd3" )
+beta_selection_genes %>% setdiff(AvailableData(dge_Cd44lo_Cd25hi))
+beta_selection_genes %<>% intersect(AvailableData(dge_Cd44lo_Cd25hi))
+Cd44lo_Cd25hi_heatmap_hand_picked = make_heatmap_for_table( dge_Cd44lo_Cd25hi, 
+                                                            genes_in_order = beta_selection_genes,
+                                                            desired_cluster_order = c("wt", "Rag1null"),
+                                                            ident.use = "genotype" )
+ggsave(file.path(results_path, "Cd44lo_Cd25hi_heatmap_hand_picked.pdf"), Cd44lo_Cd25hi_heatmap_hand_picked)
+
+{
+  pdf(file.path(results_path, "Cd44lo_Cd25hi_violin_hand_picked.pdf"), width = 20, height = 20)
+  VlnPlot(dge_Cd44lo_Cd25hi, beta_selection_genes, group.by = "genotype")
+  dev.off()
+}
+
+```
+
+#### Comparison at Cd44lo_Cd25lo stage 
+
+```{r}
+dge_Cd44lo_Cd25lo = SubsetDataFlex( dge_tcell, 
+                           vars.use = c("Cd44_score", "Il2ra_score"), 
+                           predicate = " Cd44_score < cutoff_CD44 & Il2ra_score < cutoff_CD25 " )
+
+de_genes_Cd44lo_Cd25lo = FindMarkersFlex( dge_Cd44lo_Cd25lo,
+                                 ident.use = "genotype",
+                                 ident.1 = "Rag1null", 
+                                 ident.2 = "wt", thresh.use = 0 )
+
+save_marker_table( de_genes_Cd44lo_Cd25lo, results_path, testname = "Rag1null_Cd44lo_Cd25lo", remove_rp = TRUE, add_to_inventory = FALSE )
+de_genes_Cd44lo_Cd25lo_bak = de_genes_Cd44lo_Cd25lo
+de_genes_Cd44lo_Cd25lo %<>% subset( !is_rp(gene) )
+
+do_enrichr( geneset = de_genes_Cd44lo_Cd25lo %>% subset(avg_diff > 0 & q.value < 0.1, select = "gene", drop = T), 
+            results_path = results_path, geneset_name = "Cd44lo_Cd25lo_Rag1_up" )
+do_enrichr( geneset = de_genes_Cd44lo_Cd25lo %>% subset(avg_diff < 0 & q.value < 0.1, select = "gene", drop = T), 
+            results_path = results_path, geneset_name = "Cd44lo_Cd25lo_Rag1_dn" )
+
+Cd44lo_Cd25lo_heatmap_data_driven = make_heatmap_for_table( dge_Cd44lo_Cd25lo, 
+                                                   genes_in_order = c(
+                                                     de_genes_Cd44lo_Cd25lo$gene %>% head(20), 
+                                                     de_genes_Cd44lo_Cd25lo$gene %>% tail(20) ),
+                                                   desired_cluster_order = c("wt", "Rag1"),
+                                                   ident.use = "genotype" )
+ggsave(file.path(results_path, "Cd44lo_Cd25lo_heatmap_data_driven.pdf"), Cd44lo_Cd25lo_heatmap_data_driven)
+
+beta_selection_genes = c( "Cd3g","Cd3d","Cd3e", "Cd247",
+                          "Ptcra", "TRB_TOTAL", "Rorc",
+                           "Fyn", "Myc", "Csk", "Tcf3", 
+                          "Lat", "Lcp2", "Zap70", "Plcg1", "Prkca",
+                          "Lck", "Hras", "Raf1", "Vav1", "Egr1", "Nfkb1",
+                          paste0("Id", 1:4), 
+                          "IG1.S", "S", "G2.M", "M", "M.G1", 
+                          "Cdk4", "Cdk6", "Ccnd3" )
+beta_selection_genes %>% setdiff(AvailableData(dge_Cd44lo_Cd25lo))
+beta_selection_genes %<>% intersect(AvailableData(dge_Cd44lo_Cd25lo))
+Cd44lo_Cd25lo_heatmap_hand_picked = make_heatmap_for_table( dge_Cd44lo_Cd25lo, 
+                                                   genes_in_order = beta_selection_genes,
+                                                   desired_cluster_order = c("wt", "Rag1null"),
+                                                   ident.use = "genotype" )
+ggsave(file.path(results_path, "Cd44lo_Cd25lo_heatmap_hand_picked.pdf"), Cd44lo_Cd25lo_heatmap_hand_picked)
+
+{
+  pdf(file.path(results_path, "Cd44lo_Cd25lo_violin_hand_picked.pdf"), width = 20, height = 20)
+  VlnPlot(dge_Cd44lo_Cd25lo, beta_selection_genes, group.by = "genotype")
+  dev.off()
+}
+
+```
+
+```{r}
+volcano_plot = function(X, main, cutoff, get_labeled_subset = head){
+  names(X) %<>% make.names
+  X[["X.log10q"]] %<>% pmin(10)
+  p = ggplot(X) + ggtitle(main) +
+    geom_point(               aes_string( x = "avg_diff", y = "X.log10q"), size = 0.2) + 
+    ggrepel::geom_text_repel( aes_string( x = "avg_diff", y = "X.log10q", label = "gene"), 
+                              min.segment.length = 0,
+                              data = get_labeled_subset( X ) ) 
+  return(p)
+}
+
+gls = function(X) {
+  Y = subset(X, gene %in% c("Cd8a", "Cd8b", "Gzma",  "Il2ra", "Ptcra"))
+  return(Y)
+}
+
+# de_genes_Cd44lo_Cd25lo = rbind(
+#   read.table("~/Desktop/scRNA_redo_12_p0/results/KO/2017_Oct_13__22_01_06/user/Rag1null_Cd44lo_Cd25lo_up.txt", header = T),
+#   read.table("~/Desktop/scRNA_redo_12_p0/results/KO/2017_Oct_13__22_01_06/user/Rag1null_Cd44lo_Cd25lo_dn.txt", header = T) %>%
+#     (thymusatlastools:::flip_table)
+#   )
+de_genes_Cd44lo_Cd25lo = de_genes_Cd44lo_Cd25lo[complete.cases(de_genes_Cd44lo_Cd25lo), ]
+p = volcano_plot( de_genes_Cd44lo_Cd25lo %>% tidy_marker_table, 
+                  main = "DE genes in Cd44lo_Cd25lo thymocytes", 
+                  get_labeled_subset = gls )
+ggsave( file.path(results_path, "volcano.pdf"), p, width = 4, height = 4 )
+
+
+```
+

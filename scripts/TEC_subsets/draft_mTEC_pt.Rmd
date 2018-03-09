@@ -1,0 +1,109 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+#### Load data
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+dge = inventory_get( tag = "TECS_12_P0_bag_labeled" ) %>% readRDS
+mTEC_names = c(paste0("TEC", 1:3), paste0("mTEC", 1:3))
+dge = SubsetDataFlex(dge,
+                     "cell_type", "cell_type %in% mTEC_names", 
+                     results_path = results_path, 
+                     cols.use = c("gray", "black")) 
+all_params = expand.grid( num_pc = 8, 
+                          clust_method = "SNN", 
+                          clust_granularities_as_string = "0.5",
+                          cc_method = "average",
+                          plot_all_var_genes = F,
+                          excess_var_cutoff = 0.5, 
+                          log_expr_cutoff = 0.1,
+                          stringsAsFactors = F )
+dge %<>% explore_embeddings( results_path = results_path, all_params = all_params )
+
+# Select genes
+# dge@var.genes = get_similar_genes(dge, "Cd74", 300)
+dge = master_pt(dge, results_path, method = "DPT", reset_var_genes = F )
+# Orient DC1 correctly and set as PT 
+dge@data.info$branch_viz_1 %<>% multiply_by(sign(cor(dge@data.info$branch_viz_1, dge@data.info$eday )))
+dge@data.info$pseudotime = dge@data.info$branch_viz_1
+# Save and inventory the object
+dge_pt_path = file.path(results_path, "dge_mTEC_pt.data")
+saveRDS( dge, dge_pt_path )
+inventory_add( tag = "dge_mTEC_pt", filename = dge_pt_path, force = T )
+# dge = inventory_get( tag = "dge_mTEC_pt") %>% readRDS
+
+# # Plot eday by diffusion components
+p = ggplot(FetchData(dge, c( "pseudotime", "eday" ) ) ) +
+  geom_density(aes_string(x = "pseudotime", fill = "factor(eday)"), alpha = 0.4 ) + 
+  scale_fill_manual(values = extended_eday_colors) + 
+  theme(legend.position = "none")
+ggsave(file.path(results_path, "eday_density.pdf"), plot = p , width = 4, height = 2)
+
+p = ggplot(FetchData(dge, c( "pseudotime", "eday" ) ) ) +
+  geom_density(aes_string(x = "pseudotime"), alpha = 0.4 ) + 
+  scale_fill_manual(values = extended_eday_colors) + 
+  theme(legend.position = "none")
+ggsave(file.path(results_path, "plain_density.pdf"), plot = p , width = 4, height = 2)
+
+p = ggplot(FetchData(dge, c( "branch_viz_1", 
+                             "branch_viz_2", 
+                             "eday" ) ) ) +
+  geom_point(aes_string( x      = "branch_viz_1",
+                         y      = "branch_viz_2",
+                         colour = "factor(eday)") ) + 
+  scale_colour_manual(values = extended_eday_colors) + 
+  theme(legend.position = "none")
+ggsave(file.path(results_path, "eday_DC.pdf"), plot = p , width = 4, height = 4)
+
+p = ggplot(FetchData(dge, c( "branch_viz_1", 
+                             "branch_viz_3", 
+                             "eday" ) ) ) +
+  geom_point(aes_string( x      = "branch_viz_1",
+                         y      = "branch_viz_3",
+                         colour = "factor(eday)") ) + 
+  scale_colour_manual(values = extended_eday_colors) + 
+  theme(legend.position = "none")
+ggsave(file.path(results_path, "eday_DC3.pdf"), plot = p , width = 4, height = 4)
+
+p = ggplot(FetchData(dge, c( "branch_viz_1", 
+                             "branch_viz_2", 
+                             "pseudotime" ) ) ) +
+  geom_point(aes_string( x      = "branch_viz_1",
+                         y      = "branch_viz_2",
+                         colour = "pseudotime") ) + 
+  scale_colour_gradientn(colors = c("khaki1", "red")) + 
+  theme(legend.position = "none")
+ggsave(file.path(results_path, "pt_DC.pdf"), plot = p , width = 8, height = 8)
+
+
+p = ggplot(FetchData(dge, c( "branch_viz_1", 
+                             "branch_viz_2", 
+                             "eday" ) ) ) +
+  geom_point(aes_string( x      = "branch_viz_1",
+                         y      = "branch_viz_2") ) + 
+  scale_colour_manual(values = "black") + 
+  theme(legend.position = "none")
+ggsave(file.path(results_path, "DC_plain.pdf"), plot = p , width = 8, height = 8)
+
+# # Plot genes smoothed on PT
+save_feature_plots( dge, results_path, 
+                    gene_list = c("Cldn4", "Tnfrsf11a", "Aire", "Cd80"),
+                    do_time_series = T, types = "PDF", add_points = F, width = 4, height = 2 )
+
+# # Additional follow-up
+smoothed = smooth_and_cluster_genes( dge, results_path, 
+                                     genes.use = dge@data %>% rownames, 
+                                     pval_cutoff = 0.1, num_clusters = 3 )
+p_heat = heatmap_gene_clusters( dge = dge, 
+                                results_path = results_path, 
+                                cluster_mod = smoothed$cluster_mod,
+                                smoothers = smoothed$smoothers, 
+                                genes_to_label = names(smoothed$smoothers) )
+ggsave(file.path(results_path, "p_heat.pdf"), p_heat, height = 12)
+```

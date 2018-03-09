@@ -1,0 +1,120 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+## Initial exploration
+
+#### Setup data and metadata/classifier labels
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+dge_rag1 = c("Rag1KO_WholeThy_rep1", "Rag1KO_WholeThy_rep2" ) %>%
+  load_maehrlab_private_data %>% dge_merge_list %>% seuratify_thy_data( results_path )
+dge_rag1 %<>% add_tcr
+dge_rag1 = add_maehrlab_metadata( dge_rag1, "eday" )
+dge_rag1 %<>% add_cc_score %>% extract2("dge")
+dge_rag1 %<>% add_maehrlab_metadata("genotype")
+dge_atlas = inventory_get( tag = "overview_clean_labeled" ) %>% readRDS
+dge_rag1  = knn_classifier( dge_train = dge_atlas, dge_test = dge_rag1,
+                            ident.use = "ident",
+                            vars.all = NULL, my_transform = "PCA_20",
+                            k = 25, reject_prop = 0.00 )
+```
+
+#### Run exploratory pipeline
+
+```{r}
+all_params = expand.grid( cc_method = c( "average" ),
+                          excess_var_cutoff = c( 0.5 ),
+                          log_expr_cutoff = c( 0.1 ), 
+                          num_genes_to_select = NA, 
+                          prop_genes_to_select = NA, 
+                          var_gene_method = "seurat",
+                          num_pc = c( 15 ), 
+                          clust_method = "SNN",
+                          clust_granularities_as_string = "0.5",
+                          plot_all_var_genes = F,
+                          stringsAsFactors = F )
+dge_rag1 %<>% add_maehrlab_metadata("species")
+dge_rag1 = explore_embeddings( dge_rag1, results_path = file.path( results_path, "Rag1null" ), 
+                               test_mode = F, all_params )
+param_string = collapse_by_name(all_params[1, ])
+dge_rag1  %<>% AddMetaData( dge_rag1 %>% FetchData("classifier_ident") %>% rename(c("classifier_ident"="cell_type")) )
+dge_rag1_path = file.path( results_path, "Rag1null", param_string, "dge.data" )
+dir.create.nice(dirname(dge_rag1_path))
+saveRDS(dge_rag1, dge_rag1_path)
+inventory_add( tag = "dge_rag1_explore", 
+               filename = dge_rag1_path, 
+               force = T, extra = "Seurat object containing Rag1null whole thymus data.")
+save_feature_plots( dge_rag1, results_path = file.path( results_path, "Rag1null" ) ,
+                    gene_list_name = "overall_markers", types = c("pdf", "pdf_no_leg", "PNG_PDF_split"),
+                    cols.use = c("goldenrod", "cadetblue"), 
+                    gene_list = "orig.ident" ) 
+save_feature_plots( dge_rag1, results_path = file.path( results_path, "Rag1null" ) ,
+                    gene_list_name = "overall_markers", types = c("pdf", "pdf_no_leg", "PNG_PDF_split"),
+                    cols.use = fig1_cols,
+                    gene_list = "classifier_ident" ) 
+
+
+```
+
+## Joint exploration with atlas
+
+#### Set up data 
+
+```{r}
+
+dge_rag1 %<>% SetIdent( ident.use = dge_rag1 %>% FetchData("classifier_ident") %>% extract2(1) )
+dge_atlas %<>% AddMetaData( dge_atlas@ident %>% 
+                              as.character %>% 
+                              setNames(nm = names(dge_atlas@ident)),
+                            col.name = "cell_type" )
+dge_all = SeuratMerge( dge1 = dge_atlas %>% SubsetDataFlex(vars.use = "eday", predicate = "eday==16.5"), 
+                       dge2 = dge_rag1, 
+                       vars.keep = c("cell_type") )
+dge_all %<>% add_maehrlab_metadata("genotype")
+dge_all %<>% add_maehrlab_metadata("species")
+dge_all %<>% add_tcr
+
+```
+
+#### Run exploratory pipeline
+
+```{r}
+dge_all = explore_embeddings( dge_all, results_path = file.path( results_path, "all" ), 
+                              test_mode = F, all_params)
+# # Save some overall markers
+param_string = collapse_by_name(all_params[1, ])
+inventory_add( tag = "dge_Rag1null_plus_atlas_whole_16_5", force = T,
+               filename = file.path( results_path, "all", param_string, "dge.data"))
+
+save_feature_plots( dge_all, results_path = file.path( results_path, "all" ) ,
+                    gene_list_name = "overall_markers", types = c("pdf", "pdf_no_leg"),
+                    gene_list = c( "Actb", "Ptprc", "Myb", "Cd3e", "Cd3d", "Cd3g", 
+                                   "Itgax","Lyz2", "Klrd1", "Klrb1c", 
+                                   "Col3a1", "Pdgfra", "Egfl7", "Esam",
+                                   "Pth", "Gcm2", "Il7", "Foxn1",
+                                   "Ptcra", "Cd44", "Il2ra", "Cd8a", "Cd4",
+                                   "ident", "genotype", "orig.ident" ) )
+
+save_feature_plots( dge_all, results_path = file.path( results_path, "all" ) ,
+                    gene_list_name = "metadata", types = c("pdf", "pdf_no_leg", "PNG_PDF_split"),
+                    cols.use = RAG_WT_COLORS, 
+                    gene_list = "genotype" ) 
+
+save_feature_plots( dge_all, results_path = file.path( results_path, "all" ) ,
+                    gene_list_name = "metadata", types = c("pdf", "pdf_no_leg", "PNG_PDF_split"),
+                    cols.use = c("cadetblue", "cadetblue1", "purple", "goldenrod", "goldenrod1"), 
+                    gene_list = "orig.ident" ) 
+
+save_feature_plots( dge_all, results_path = file.path( results_path, "all" ) ,
+                    gene_list_name = "metadata", types = c("pdf", "pdf_no_leg", "PNG_PDF_split"),
+                    cols.use = fig1_cols, 
+                    gene_list = "cell_type" ) 
+```
+
+             

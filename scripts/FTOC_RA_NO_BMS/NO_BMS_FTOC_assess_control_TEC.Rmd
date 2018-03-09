@@ -1,0 +1,165 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+## FTOC versus *in vivo* TECs
+
+Assemble a big dge with ctrl and atlas.
+The postconditions of this chunk are that cell_type should store the ident for the atlas 
+and the classifier ident for the FTOC.
+Also, edayXsource_tissue stores an interaction between eday and FTOC/in vivo.
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+dge_atlas_ftoc_ctrl_TEC = inventory_get( tag = "dge_FTOC_RA_CTRL_NO_BMS_tec" ) %>% readRDS %>% 
+  SubsetDataFlex( "perturbation", "perturbation=='CTRL'")
+dge_atlas_ftoc_ctrl_TEC %<>% SeuratMerge( inventory_get("TECS_12_P0_bag_labeled") %>% readRDS )
+dge_atlas_ftoc_ctrl_TEC %<>% add_edayXother( other = "source_tissue", other_levels = c("embryo", "FTOC"))
+
+all_params = expand.grid( cc_method = c( "average" ),
+                          excess_var_cutoff = c( 0.5 ),
+                          log_expr_cutoff = c( 0.1 ), 
+                          prop_genes_to_select = NA, 
+                          num_genes_to_select = NA, 
+                          var_gene_method = "seurat",
+                          num_pc =  25, 
+                          clust_method = "SNN",
+                          clust_granularities_as_string = "0.5",
+                          plot_all_var_genes = F,
+                          stringsAsFactors = F)
+dge_atlas_ftoc_ctrl_TEC %<>% explore_embeddings( results_path, all_params)
+dge_path = file.path( results_path, collapse_by_name(all_params[1, ]), "dge.data" )
+inventory_add(tag = "dge_ftoc_ctrl_plus_atlas_TEC", 
+              filename = dge_path, 
+              force = T)
+# dge_atlas_ftoc_ctrl_TEC = inventory_get( "dge_ftoc_ctrl_plus_atlas_TEC" ) %>% readRDS
+
+```
+
+Contextual info
+
+```{r}
+
+dge_atlas_ftoc_ctrl_TEC %<>% add_maehrlab_metadata("source_tissue")
+dge_atlas_ftoc_ctrl_TEC %>% save_feature_plots(results_path,
+                                types = c("PDF", "PDF_no_leg", "PNG_PDF_split"),
+                                gene_list = "source_tissue",
+                                gene_list_name = "metadata")
+
+dge_atlas_ftoc_ctrl_TEC %>% save_feature_plots(results_path,
+                                cols.use = TEC_cols, 
+                                types = c("PDF", "PDF_no_leg", "PNG_PDF_split"),
+                                gene_list = "cell_type",
+                                gene_list_name = "metadata")
+
+dge_atlas_ftoc_ctrl_TEC %>% save_feature_plots(results_path,
+                                types = c("PDF", "PDF_no_leg", "PNG_PDF_split"),
+                                gene_list = "plain_grey",
+                                gene_list_name = "metadata")
+
+dge_atlas_ftoc_ctrl_TEC %>% save_feature_plots(results_path,
+                                               cols.use = extended_eday_colors,
+                                               types = c("PDF", "PDF_no_leg", "PNG_PDF_split"),
+                                               gene_list = "eday",
+                                               gene_list_name = "metadata")
+
+dge_atlas_ftoc_ctrl_TEC %>% save_feature_plots(results_path,
+                                               cols.use = extended_eday_ftoc_colors,
+                                               types = c("PDF", "PDF_no_leg", "PNG_PDF_split"),
+                                               gene_list = "edayXsource_tissue",
+                                               gene_list_name = "metadata")
+```
+
+Cell type proportions 
+
+```{r}
+dge_atlas_ftoc_ctrl_TEC@data.info$cell_type = "initialize"
+TEC_assignments_atlas = inventory_get("TECS_12_P0_bag_labeled") %>% readRDS %>% FetchData("cell_type")
+TEC_assignments_ftoc = knn_classifier(dge_train = inventory_get("TECS_12_P0_bag_labeled") %>% readRDS, 
+                                      dge_test  = inventory_get("dge_FTOC_RA_CTRL_NO_BMS_tec" ) %>% readRDS, 
+                                      ident.use = "cell_type") 
+TEC_assignments_ftoc %<>% FetchData("classifier_ident")
+dge_atlas_ftoc_ctrl_TEC@data.info[rownames(TEC_assignments_atlas), "cell_type"] = TEC_assignments_atlas[, 1] %>% as.character
+dge_atlas_ftoc_ctrl_TEC@data.info[rownames(TEC_assignments_ftoc),  "cell_type"] =  TEC_assignments_ftoc[, 1] %>% as.character
+
+dge_atlas_ftoc_ctrl_TEC %<>% SubsetDataFlex("eday" , "eday %in% (13:16 + 0.5)")
+dge_atlas_ftoc_ctrl_TEC %<>% SanitizeGenes
+p = SeuratPie( dge = dge_atlas_ftoc_ctrl_TEC, 
+               ident.use = "cell_type", 
+               facet_by = "edayXsource_tissue", 
+               main = "FTOC", col = TEC_cols, drop_levels = T ) +
+  facet_wrap("edayXsource_tissue", nrow = 2 )
+ggsave(file.path(results_path, "ident_by_day.pdf"), p, width = 15, height = 5)
+
+{
+  sink(file.path(results_path, "fisher_test_TEC_subtypes_16_5_v_FTOC.pdf"))
+  dge_atlas_ftoc_ctrl_TEC %>% FetchData(c("edayXsource_tissue", "cell_type")) %>% table %>% extract(c("16.5.FTOC", "16.5.embryo"), ) %>% as.matrix %>% fisher.test(hybrid = T)
+  print("Cell count:")
+  dge_atlas_ftoc_ctrl_TEC %>% FetchData(c("edayXsource_tissue", "cell_type")) %>% table %>% extract(c("16.5.FTOC", "16.5.embryo"), ) %>% as.matrix %>% sum
+  sink()
+}
+
+```
+
+TACS to measure overall maturity
+
+```{r}
+cutoff_H2.Aa  = 2
+cutoff_Epcam = 1.5
+p_TACS_tec = dge_atlas_ftoc_ctrl_TEC %>%
+  TACS(gene1 = "H2.Aa", gene2 = "Epcam", cutoffs = c( cutoff_H2.Aa, cutoff_Epcam ),
+       facet_by = "edayXsource_tissue",  density = T) + 
+  scale_color_manual(values = extended_eday_ftoc_colors) + 
+  facet_wrap("edayXsource_tissue", nrow = 1)
+ggsave(file.path(results_path, "p_TACS_tec_maturation.pdf"), p_TACS_tec, width = 15, height = 4)
+
+dge_atlas_ftoc_ctrl_TEC %<>% TACS(gene1 = "H2.Aa", gene2 = "Epcam", 
+                                  cutoffs = c( cutoff_H2.Aa, cutoff_Epcam ),
+                                  facet_by = "edayXsource_tissue",  return_val = "seurat") 
+X = dge_atlas_ftoc_ctrl_TEC %>% FetchData(c("edayXsource_tissue", "H2.Aa_score", "Epcam_score"))
+X$H2.Aa_score %<>% is_greater_than(cutoff_H2.Aa)
+X$Epcam_score %<>% is_greater_than(cutoff_Epcam)
+colnames(X)[2:3] = c("H2.Aa_hi", "Epcam_hi")
+X_counts = table(X) %>% apply(1, c) %>% extract(, c("13.5.embryo", "16.5.FTOC"))
+{
+  sink(file.path(results_path, "fisher_test_TEC_ftoc.txt"))
+  fisher.test( X_counts, hybrid = T ) %>% print
+  print( "Cell counts" )
+  sum(X_counts)
+  sink()
+}
+write.table(table(X) %>% as.data.frame(), file.path(results_path, "TEC_counts.txt"), quote = F)
+
+```
+
+Fractional identity to measure maturity
+
+```{r}
+eefc = extended_eday_ftoc_colors
+names(eefc) %<>% make.names
+fi_out = display_fractional_identity( dge_test  = dge_atlas_ftoc_ctrl_TEC, 
+                                      dge_train = dge_atlas_ftoc_ctrl_TEC %>%
+                                        SubsetDataFlex( "source_tissue", "source_tissue=='embryo'" ),
+                                      main = "FTOC maturity (TECs only)",
+                                      ident.use = "eday",
+                                      test.ident.use = "edayXsource_tissue",
+                                      test.col = eefc,
+                                      genes.use = NULL )
+
+
+ggsave( file.path( results_path, "fractional_identities_TEC_FTOC_identities_hidden.pdf" ), 
+        fi_out$plot,
+        width = 8, height = 2.5 )
+
+```
+
+
+
+
+
+
+

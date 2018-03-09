@@ -1,0 +1,135 @@
+
+Retrieve data
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+dge_ftoc_tec = inventory_get( tag = "dge_FTOC_RA_CTRL_NO_BMS_tec" ) %>% readRDS
+```
+
+Redo exploration following doublet removal
+
+```{r}
+all_params = expand.grid( cc_method = c( "average" ),
+                          excess_var_cutoff = c( 0.5 ),
+                          log_expr_cutoff = c( 0.1 ), 
+                          prop_genes_to_select = NA, 
+                          num_genes_to_select = NA, 
+                          var_gene_method = "seurat",
+                          num_pc =  25, 
+                          clust_method = "SNN",
+                          clust_granularities_as_string = "0.5",
+                          plot_all_var_genes = F,
+                          stringsAsFactors = F)
+dge_ftoc_tec %<>% explore_embeddings( results_path, all_params)
+dge_path = file.path( results_path, collapse_by_name(all_params[1, ]), "dge.data" )
+inventory_add(tag = "dge_FTOC_RA_CTRL_NO_BMS_tec", 
+              filename = dge_path, 
+              force = T)
+  
+# Re-classify in terms of atlas TEC exploration
+dge_ftoc_tec = knn_classifier( dge_train = inventory_get( "TECS_12_P0_bag_labeled" ) %>% readRDS, 
+                               dge_test = dge_ftoc_tec, 
+                               ident.use = "cell_type",
+                               vars.all = NULL, my_transform = "PCA_20", 
+                               k = 25, reject_prop = 0.00 )
+p = SeuratPie(dge_ftoc_tec, ident.use = "classifier_ident", facet_by = "perturbation", label = T, col = TEC_cols)
+ggsave(file.path(results_path, "cell_type_ratios_RA_CTRL.pdf"), p)
+```
+
+Look at differential expression over all TECs together
+
+```{r}
+
+dge_ftoc_tec@data.info$const = "all"
+de_RA_ctrl = DiffExpByType( dge = dge_ftoc_tec,
+                            treatment_var = "perturbation", 
+                            treatment_1 = "RA", treatment_2 = "CTRL", 
+                            cell_type_var = "const", 
+                            thresh.use = 0 )
+de_RA_ctrl_bak = de_RA_ctrl
+SaveMarkerTables(de_RA_ctrl,  results_path, filter_name = "RA_TEC_all" )
+de_RA_ctrl = de_RA_ctrl[[1]]
+
+do_enrichr(file.path(results_path, "markers"),
+           geneset = head(de_RA_ctrl, 50), geneset_name = "RA_up_strict")
+do_enrichr(file.path(results_path, "markers"),
+           geneset = tail(de_RA_ctrl, 50), geneset_name = "RA_dn_strict")
+
+# de_RA_ctrl = read.table("~/Desktop/scRNA_redo_12_p0/results/FTOC_RA_NO_BMS/2017_Oct_13__21_59_37/user/markers/RA_TEC_all/all.txt", header = T, sep = "\t", stringsAsFactors = F)
+volcano_plot = function(X, main, cutoff, 
+                        get_labeled_subset =
+                          function(X) subset( X, gene %in% c( "Akap12", "Cyp26b1", "Dhrs3" ) ) ){
+  names(X) %<>% make.names
+  X[["X.log10q"]] %<>% pmin(40)
+  p = ggplot(X) + ggtitle(main) +
+    geom_point(               aes_string( x = "avg_diff", y = "X.log10q"), size = 0.2) + 
+    ggrepel::geom_text_repel( aes_string( x = "avg_diff", y = "X.log10q", label = "gene"),
+                              min.segment.length = 0,
+                              data = get_labeled_subset( X ) ) 
+  return(p)
+}
+
+p = volcano_plot( X = de_RA_ctrl %>% tidy_marker_table, main = "All TECs" )
+ggsave( file.path(results_path, "volcanoes.pdf"), p, width = 3, height = 3 )
+
+
+
+```
+
+Save some summary plots
+
+```{r}
+
+save_feature_plots( dge_ftoc_tec, results_path, 
+                    types = c("PDF", "PDF_no_leg", "PNG_PDF_split"),
+                    gene_list_name = "metadata",
+                    gene_list = "perturbation", cols.use = RA_FTOC_colors)
+save_feature_plots( dge_ftoc_tec, results_path, 
+                    types = c("PDF", "PDF_no_leg", "PNG_PDF_split"),
+                    gene_list_name = "metadata",
+                    gene_list = "classifier_ident", cols.use = TEC_cols)
+save_feature_plots( dge_ftoc_tec, results_path, 
+                    types = c("PDF", "PDF_no_leg", "PNG_PDF_split"),
+                    gene_list_name = "metadata",
+                    gene_list = "ident")
+save_feature_plots( dge_ftoc_tec, results_path, 
+                    types = c( "PDF_no_leg"),
+                    gene_list_name = "TEC_genes",
+                    gene_list = get_TEC_genes())
+save_feature_plots( dge_ftoc_tec, results_path, 
+                    gene_list_name = "RA_genes",
+                    gene_list = "Cyp26b1", cols.use = c("khaki1", "red"))
+save_feature_plots( dge_ftoc_tec, results_path, 
+                    gene_list_name = "metadata",
+                    gene_list = "Cyp26b1", cols.use = c("grey"))
+```
+
+
+#### TACS plots
+
+```{r}
+
+dge_atlas_tec = inventory_get( tag = "TECS_12_P0_bag_labeled" ) %>% readRDS
+dge_atlas_tec %<>% SubsetDataFlex("eday", "eday %in% (13:16 + 0.5)")
+
+dge_ftoc_atlas_tec = SeuratMerge( dge_atlas_tec, dge_ftoc_tec )
+dge_ftoc_atlas_tec %<>% add_maehrlab_metadata("eday")
+dge_ftoc_atlas_tec %<>% add_maehrlab_metadata("source_tissue")
+dge_ftoc_atlas_tec %<>% add_maehrlab_metadata("perturbation")
+
+dge_ftoc_atlas_tec@data.info[["origin"]] = dge_ftoc_atlas_tec@data.info[["perturbation"]] %>% as.character
+dge_ftoc_atlas_tec@data.info[["source_tissue"]]=="embryo" -> vivo_idx
+dge_ftoc_atlas_tec@data.info[["origin"]][vivo_idx] = dge_ftoc_atlas_tec@data.info[["eday"]][vivo_idx]
+
+p = TACS( dge_ftoc_atlas_tec %>% SanitizeGenes, 
+          dge_reference = dge_atlas_tec %>% SanitizeGenes,
+          gene1 = "H2.Aa", 
+          gene2 = "Epcam", 
+          cutoffs = c(1.7, 1.7),
+          facet_by = "origin",
+          density = T )
+p = p + scale_color_manual(values = c(extended_eday_colors, "CTRL" = "blue", "RA" = "purple"))
+ggsave(file.path(results_path, "TACS_tec_Psmb11_Epcam.pdf"), p, width = 9, height = 7)
+
+
+```

@@ -1,0 +1,57 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+#### Retrieve data
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+dge_atlas_NKT = inventory_get("NKT_atlas_with_tcr_cl_bag") %>% readRDS
+
+
+# Get cell-type specific expression for NCL
+x = aggregate_nice( deseuratify_raw_data(dge_atlas_NKT) %>% t, dge_atlas_NKT@ident, FUN = sum ) %>% t
+x %<>% as.data.frame
+x$mouse_symbol = rownames(x)
+
+# Include only genes that depict already knows about.
+depict_genes = read.table( "~/Desktop/depict_with_atlas/depict/data/original/GPL570EnsemblGeneExpressionPerTissue_DEPICT20130820_z.txt", 
+                           row.names = 1, header = T, stringsAsFactors = F, sep = "\t" ) %>% rownames
+
+# Convert row indices from mouse symbol to human ensembl id (of ortholog).
+ens_87_orth =  thymusatlastools::get_ortholog_table()
+ens_87_orth %<>% subset( humanid %in% depict_genes )
+ens_87_orth = ens_87_orth[!duplicated(ens_87_orth$mousesym), ]
+mouse_sym_to_human_id = setNames( ens_87_orth$humanid, ens_87_orth$mousesym ) 
+x$humanid = mouse_sym_to_human_id[x$mouse_symbol]
+x = x[complete.cases(x), ]
+expr_only = subset(x, TRUE, select = paste0("NCL", 1:8))
+expr_only = aggregate_nice( expr_only, x$humanid, FUN = sum ) 
+standardize_const_tolerant = function( x ){
+  if(sd(x)==0){ return(rep(0, length(x)))}
+  return(standardize(x))
+}
+expr_normed = apply( expr_only, 1, standardize_const_tolerant ) %>% t
+colnames(expr_normed) = colnames(expr_only)
+missing = setdiff( depict_genes, rownames(expr_normed) )
+extra   = setdiff( rownames(expr_normed), depict_genes )
+zeropad =  matrix(0, ncol = 8, nrow = length( missing ) )
+rownames( zeropad ) = missing
+expr_normed = rbind( expr_normed, zeropad )
+expr_normed = expr_normed[depict_genes, ]
+
+# Format and write expression data
+expr_normed_formatted = expr_normed %>% as.data.frame
+expr_normed_formatted$`-` = rownames(expr_normed)
+expr_normed_formatted = expr_normed_formatted[c(9, 1:8)]
+write.table( expr_normed_formatted, file.path( results_path, "NCL_expr_gene_z.txt" ),
+             col.names = T, row.names = F, quote = F, sep = "\t", fileEncoding = "ascii" )
+write.table( expr_normed_formatted %>% colnames %>% extract(-1), file.path( results_path, "NCL_tissue_mapping.txt" ),
+             col.names = F, row.names = F, quote = F, sep = "\t", fileEncoding = "ascii" )
+
+```
+
+

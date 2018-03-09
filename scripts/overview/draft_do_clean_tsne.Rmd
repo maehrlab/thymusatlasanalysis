@@ -1,0 +1,32 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+# # Retrieve Seurat labeled obj and purify
+dge = inventory_get( tag = "overview_no_dub" ) %>% readRDS
+dge %<>% add_maehrlab_metadata("eday")
+
+all_params = expand.grid( cc_method = c( "average" ),
+                          excess_var_cutoff = c( 0.5, 0.8, 1.2 ),
+                          log_expr_cutoff = c( 0.10 ), 
+                          num_genes_to_select = NA, 
+                          prop_genes_to_select = NA, 
+                          var_gene_method = "seurat",
+                          num_pc = c( 25, 20 ), 
+                          clust_method = "SNN",
+                          clust_granularities_as_string = "0.5",
+                          plot_all_var_genes = F,
+                          stringsAsFactors = F )
+dge %<>% explore_embeddings( results_path, all_params[1, ])
+
+freezr::inventory_add( tag = "overview_clean",
+                       filename = file.path( results_path, collapse_by_name(all_params[1, ]), "dge.data" ) , 
+                       extra = "Exploration of atlas data after doublet removal.", 
+                       force = T)
+```

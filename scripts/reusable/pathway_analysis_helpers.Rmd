@@ -1,0 +1,281 @@
+---
+title: "Pathway analysis helpers"
+author: "Eric Kernfeld"
+date: "December 19, 2017"
+output: html_document
+---
+
+####Pathway analysis
+
+```{r}
+library(biomaRt)
+
+#' Make a heatmap of GO term activity by cell type.
+#'
+#' @param cluster_markers Cluster markers. List of character vectors named with cluster names. 
+#' @param effect_measure How to allocate the "heat". Can be "pval" (-log10 p value from Fisher exact test),
+# "overlap" (number of markers overlapping the annotation term) or 
+#' "sum" (sum of expression of genes within that annotation term).
+#' If you pick "sum", then the dge input must be provided.
+#' @param wrap Passed to OrderRowsForHeatmap.
+#' @param dge Required if effect_measure is 'sum'.
+#' @param ident.use Determines cells to fetch from dge for each cluster. Gets matched with names(cluster_markers).
+#' @param desired_db Databases to draw annotations from. Can be any of:
+#'           "GO_Biological_Process_2015"
+#'           "GO_Molecular_Function_2015"
+#'           "GO_Cellular_Component_2015"
+#'           "KEGG_2016"
+#'           "MGI_Mammalian_Phenotype_Level_3"
+#'           "MGI_Mammalian_Phenotype_Level_4" 
+#'
+make_go_heatmap = function( cluster_markers,
+                            num_genes_tested,
+                            effect_measure = "overlap",
+                            desired_db = c("KEGG_2016", 
+                                           "GO_Biological_Process_2015"), 
+                            wrap = F,
+                            dge = NULL, 
+                            ident.use = "ident" ){
+  if( is.null( dge ) && (effect_measure == "sum") ){
+    stop( "If effect_measure == 'sum', you must provide a Seurat object as the 'dge' arg. \n" )
+  }
+  if( !is.null( dge ) && (effect_measure != "sum") ){
+    warning( "If effect_measure != 'sum', the 'dge' arg is ignored. \n" )
+  }
+  edb = c("GO_Biological_Process_2015", 
+          "GO_Molecular_Function_2015", 
+          "GO_Cellular_Component_2015", 
+          "KEGG_2016",
+          "MGI_Mammalian_Phenotype_Level_3",
+          "MGI_Mammalian_Phenotype_Level_4" )
+  if( length(desired_db) == 0 | !all( desired_db %in% edb ) ){
+    cat(c("Eligible databases:", edb ))
+  }
+  
+  enrichr_results = mapply( function( ... ) tryCatch( do_enrichr( ... ), error = function( e ) return( NULL ) ), 
+                            geneset = cluster_markers, 
+                            geneset_name = paste0(names(cluster_markers), "_up"),
+                            MoreArgs = list(
+                              desired_db = desired_db,
+                              results_path = file.path( results_path, "enrichr_temp" )
+                            ), 
+                            SIMPLIFY = FALSE )
+  
+  all_together = Reduce(rbind, enrichr_results )
+  genes_by_term = get_genes_from_annot( annot = all_together )
+  terms_with_genes = aggregate_nice(genes_by_term, genes_by_term$category, FUN = function(x) paste0(unique(x), collapse = " "))
+  # Disambiguate terms used by multiple DB's, then exclude dupes.
+  terms_with_genes[, "annot_readable"] = paste0( terms_with_genes[, "annot_readable"],
+                                                 " (", 
+                                                 terms_with_genes[, "database"],
+                                                 ")" )
+  terms_with_genes = terms_with_genes[!duplicated(as.data.frame(terms_with_genes)), ]
+  get_effect = function( markers, cluster = NULL, term_genes, total = num_genes_tested ){
+    term_genes = strsplit(x=term_genes, split = " ")[[1]]
+    my_mat = matrix(c(
+      total,
+      length(markers),
+      length(term_genes),
+      length(intersect(markers, term_genes))
+    ), nrow = 2)
+    if(effect_measure=="pval"){
+      return( -log10(fisher.test( my_mat )$p.value) )
+    } else if(effect_measure=="overlap"){
+      return( fisher.test( my_mat )$estimate )
+    } else if(effect_measure=="sum"){
+      cell_sums = FetchDataZeroPad( dge, term_genes ) %>% rowSums
+      cell_sums = cell_sums[FetchData( dge, ident.use )[[1]] == cluster]
+      return( mean( cell_sums ) )
+    } else {
+      stop("effect_measure should be 'pval', 'overlap', or 'sum'.\n")
+    }
+  }
+  effects_by_celltype = data.frame(matrix(NA, 
+                                          nrow = nrow(terms_with_genes),
+                                          ncol = length(cluster_markers) ))
+  rownames(effects_by_celltype) = terms_with_genes[, "annot_readable"]
+  colnames(effects_by_celltype) = names(cluster_markers)
+  for( annot_idx in 1:nrow(terms_with_genes) ){
+    effects_by_celltype[annot_idx, ] = mapply( get_effect, 
+                                               markers = cluster_markers,
+                                               cluster = names(cluster_markers),
+                                               MoreArgs = list( term_genes = terms_with_genes[annot_idx, "gene"] ) )
+  }
+  effects_by_celltype %<>% apply(1, div_by_max) %>% t %>% as.data.frame
+  effects_by_celltype[is.na(effects_by_celltype)] = 0
+  term_order = OrderRowsForHeatmap( effects_by_celltype, wrap = wrap )
+  effects_by_celltype$annot_readable = factor( terms_with_genes[, "annot_readable"], levels = term_order, ordered = TRUE )
+  effects_by_celltype_long = reshape2::melt(effects_by_celltype, id.vars = "annot_readable")
+  return(ggplot(effects_by_celltype_long) + geom_tile(aes(x = variable, y = annot_readable, fill = value)))
+}
+
+#' Given a Mammalian Phenotype Ontology id such as "MP:0005375", retrieve the corresponding genes. 
+#'
+retrieve_mp_genes = function( phenotypeID ){
+  # Used to use this for GO terms, but I found out it was only pretending to work.
+  if(strsplit(phenotypeID, split = ":")[[1]][[1]] == "GO"){
+    stop("This function cannot be used for GO terms.")
+  }
+  query = paste0('<query model="genomic" view=" Gene.symbol " >
+                  <constraint path="Gene.ontologyAnnotations.ontologyTerm.identifier" op="=" code="A" value="',
+                  phenotypeID, '" />
+                </query>')
+  postRes = httr::POST('http://www.mousemine.org/mousemine/service/query/results',
+                       body=list(query=query, format='json'),
+                       encode='form')
+  json_to_text = jsonlite::fromJSON(httr::content(postRes, as = "text")) 
+  json_to_table = data.frame(json_to_text$results, stringsAsFactors = F)
+  if(ncol( json_to_table ) >= 1){
+    return(json_to_table[[1]])
+  } else {
+    return( character() )
+  }
+}
+
+#' Given a Mammalian Phenotype Ontology id such as "MP:0005375", retrieve the corresponding genes. 
+#'
+#' Works for GO terms also (e.g. GO:54321).
+mouse_GO_db = GOSemSim::load_OrgDb("org.Mm.eg.db")
+human_GO_db = GOSemSim::load_OrgDb("org.Hs.eg.db")
+retrieve_go_genes = function( phenotypeID ){
+  prefix = strsplit( phenotypeID, split = ":" )[[1]][[1]]
+  suffix = strsplit( phenotypeID, split = ":" )[[1]][[2]]
+  if(prefix=="GO"){
+    res_mm = suppressMessages(select(mouse_GO_db,
+                                     keys = phenotypeID,
+                                     keytype = "GOALL",
+                                     columns="SYMBOL"))
+    res_hs = suppressMessages(select(human_GO_db,
+                                     keys = phenotypeID,
+                                     keytype = "GOALL",
+                                     columns="SYMBOL"))
+    
+    res_mm = res_mm$SYMBOL %>% unique
+    res_hs = res_hs$SYMBOL %>% unique %>% get_ortholog(from = "human", to = "mouse") %>% unique
+  } 
+  return( union( res_mm, res_hs ) )
+}
+
+cell_surface_genes_preloaded = retrieve_go_genes("GO:0016020") %>% unique %>% sort
+get_cell_surface_genes = function(){
+  return(cell_surface_genes_preloaded)
+}
+
+#' Convert an atomic vector x into a list of shorter atomic vectors y
+#' such that x == Reduce( y, f = c ).
+chunkify = function(x, max_len){
+  y = 1:ceiling( length(x) / max_len ) %>% as.list
+  remainder = mod( length( x ), max_len )
+  for( i in seq_along(y) ){
+    if( (remainder != 0) & (i == length( y )) ){
+      y[[i]] = x[ max_len*(i-1) + (1:remainder) ]
+    } else {
+      y[[i]] = x[ max_len*(i-1) + (1:max_len)]
+    }
+  }
+  return(y)
+}
+
+#' Convert a KEGG gene ID into a mouse gene symbol.
+#'
+kegg_to_mouse_symbol = function( kegg_gene_symbols ){
+  try_kegg = function( kegg_symbol_subset ){ 
+    tryCatch( KEGGREST::keggConv("ncbi-geneid", kegg_symbol_subset), 
+              error = function(e) { "#KEGGCONV_ERROR" })
+  }
+  ncbi = kegg_gene_symbols %>% chunkify( 200 ) %>% lapply( try_kegg ) %>% Reduce(f = c)
+  num_errors = sum( "#KEGGCONV_ERROR" == ncbi )
+  if( num_errors > 0 ){
+    warning( num_errors, " failed out of ", length(ncbi), " identifiers fed to KEGGREST::keggConv.\n" )
+  }
+  ncbi_clean = ncbi[ncbi != "#KEGGCONV_ERROR"]
+  ncbi_clean %<>% gsub( pattern = "^.*:", replacement = "")
+  symbol = mygene::getGenes(geneid = ncbi_clean)$symbol
+  symbol %<>% unique 
+  symbol = symbol[!is.na(symbol)]
+  symbol_mouse = sapply(symbol, get_ortholog, from = "human", to = "mouse")
+  return( symbol_mouse )
+}
+
+#' From Enrichr output, obtain genes.
+#' 
+#' @param annot Dataframe with columns "database" (enrichr database name conventions) and "category" (annotation terms from Enrichr).
+#' Column "database" is currently ignored, as only GO terms can be handled.
+#'
+get_genes_from_annot = function( annot ){
+  enrichr_to_simple_db_names = c( "GO_Biological_Process_2015" = "GO",
+                                  "GO_Molecular_Function_2015" = "GO",
+                                  "GO_Cellular_Component_2015" = "GO", 
+                                  "KEGG_2016" = "KEGG", 
+                                  "MGI_Mammalian_Phenotype_Level_3" = "MP",
+                                  "MGI_Mammalian_Phenotype_Level_4" = "MP" )
+  
+  if(!all(annot$database %in% names(enrichr_to_simple_db_names))){
+    avail_csv = paste0( names( enrichr_to_simple_db_names ), collapse = ", ")
+    warning(paste0("The only available databases are: \n", avail_csv))
+  }
+  
+  # # Accept only databases for which we have access to gene lists by term
+  annot %<>% subset( database %in% names( enrichr_to_simple_db_names ) )
+  annot %<>% (dplyr::mutate)( database = enrichr_to_simple_db_names[database] )
+  annot$category = annot$Term
+  idx_go = which(annot$database == "GO")
+  idx_mp = which(annot$database == "MP")
+  idx_kegg = which(annot$database == "KEGG")
+
+  # Define some single-use "styrofoam" helper functions
+  get_before_parens     = function(x) strsplit(x, split = "\\(") %>% sapply(down_idx)
+  get_from_parens       = function(x) strsplit(x, split = "\\(|\\)") %>% sapply(extract, 2)
+  get_before_underscore = function(x) strsplit(x, split = "_") %>% sapply(down_idx)
+  not1 = function(x) x[-1]
+  get_after_underscore = function(x) strsplit(x, split = "_") %>% lapply(not1) %>% sapply(paste0, collapse = " ") 
+  mp_to_mp_colon = function(x) gsub(x=x, pattern = "MP", replacement = "MP:")
+  last8 = function(x) substr( x, start = nchar( x ) - 7, stop = nchar( x ) )
+  notlast8 = function(x) substr( x, start = 1, stop = nchar( x ) - 8 )
+  
+  # # Split term ID's from description
+  annot$annot_readable = NA
+  # GO
+  annot$annot_readable[idx_go] = sapply( annot$category[idx_go], get_before_parens ) 
+  annot$category      [idx_go] = sapply( annot$category[idx_go], get_from_parens   ) 
+  # MP
+  annot$annot_readable[idx_mp] = sapply( annot$category[idx_mp], get_after_underscore ) 
+  annot$category      [idx_mp] = sapply( annot$category[idx_mp], get_before_underscore ) 
+  annot$category      [idx_mp] = sapply( annot$category[idx_mp], mp_to_mp_colon   ) 
+  # KEGG
+  annot$annot_readable[idx_kegg] = sapply( annot$category[idx_kegg], notlast8 ) 
+  annot$category      [idx_kegg] = sapply( annot$category[idx_kegg], last8 ) 
+  
+  # Clean up messiness
+  annot$annot_readable %<>% gsub(pattern = "_", replacement = " ", x = .)
+  annot$annot_readable %<>% gsub(pattern = "_Homo sapiens_| Homo sapiens", replacement = "", x = .)
+  annot$annot_readable %<>% gsub(pattern = "T cell", replacement = "T-cell", x = .)
+  annot$annot_readable %<>% Capitalize()
+  annot$annot_readable %<>% trimws
+  
+  genesets = as.list( annot$category ); 
+  for( i in seq_along( annot$category ) ){
+    # Retrieve geneset
+    if( i %in% idx_go ){
+      set_i = retrieve_go_genes( annot$category[[i]] )
+    } 
+    if( i %in% idx_mp ){
+      set_i = retrieve_mp_genes(phenotypeID = annot$category[[i]])
+    } 
+    if( i %in% idx_kegg){
+      set_i = KEGGREST::keggLink(annot$category[[i]])[, 2] %>% kegg_to_mouse_symbol
+    } 
+    
+    if( length( set_i ) == 0 ){ 
+      genesets[[i]] = as.data.frame(matrix(ncol = 4, nrow = 0))
+    } else {
+      genesets[[i]] = data.frame( gene = set_i, 
+                                  category       = annot$category[[i]], 
+                                  annot_readable = annot$annot_readable[[i]], 
+                                  database       = annot$database[[i]], stringsAsFactors = F ) 
+    }
+  }
+  return( Reduce( x = genesets, f = rbind ) )
+}
+
+```

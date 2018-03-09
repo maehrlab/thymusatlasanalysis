@@ -1,0 +1,66 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+```{r}
+results_path = Sys.getenv("FREEZR_DESTINATION")
+
+
+dge = freezr::inventory_get( tag = "overview_explore" ) %>% readRDS
+
+# Figure out what to remove
+dge = Seurat::DBClustDimension( dge, G.use = 1.1 )
+centers = aggregate.nice( FetchData(dge, c("tSNE_1", "tSNE_2")), by=FetchData(dge, "ident"), mean ) %>% as.data.frame
+centers$cluster = as.character( 1:nrow(centers) )
+p = custom_feature_plot( dge, colour = "ident", cols.use = c("grey",  length(levels(dge@ident)) ) )
+p = p + geom_text( data = centers, aes_string(x = "tSNE_1", y = "tSNE_2", label = "cluster", size = 8 ) )
+ggsave(file.path(results_path, "clusters_before_naming.pdf"), p, height = 7, width = 8)
+
+
+genes_in_order = c( "Tnnc1", "Tnnt1",
+                    "Ptprc",  "Plac8",
+                    "Esam", "Egfl7", "Emcn",
+                    "Pdgfra", "Col3a1", 
+                    "Pth",    "Gcm2", "Epcam", "Prss16", "Psmb11")
+p_heat = make_heatmap_for_table( dge = dge, 
+                                 ident.use = "ident",
+                                 desired_cluster_order = c(12, 3, 8, 11, 14, 10, 4, 6, 5, 13, 1, 7, 9, 2),
+                                 genes_in_order = genes_in_order,
+                                 normalize = "row")
+p_heat_dub = make_heatmap_for_table( dge %>% SubsetDataFlex("ident", "(ident %in% c(2, 9, 7))"), 
+                                 ident.use = "ident",
+                                 genes_in_order = genes_in_order,
+                                 normalize = "row")
+p_heat = p_heat + ggtitle("Known cluster markers") + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+p_heat_dub = p_heat_dub + ggtitle("Known cluster markers") + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+ggsave( filename = file.path( results_path, "all_heatmap.pdf"),
+        plot = p_heat,
+        width = 6, height = 6)
+ggsave( filename = file.path( results_path, "doublet_heatmap.pdf"),
+        plot = p_heat_dub,
+        width = 6, height = 6)
+
+# # Print feature plots etc to describe object before removal
+save_feature_plots( dge, results_path, 
+                    gene_list = c( "ident", genes_in_order ), 
+                    gene_list_name = "before" )
+
+
+# Remove doublets and record results
+dge_no_dub = dge %>% SubsetDataFlex("ident", "!(ident %in% c(2, 9, 7, 6))", results_path = results_path)
+nodub_path = file.path( results_path, "overview_nodub_dge.data")
+saveRDS(dge_no_dub, nodub_path)
+inventory_add(tag = "overview_no_dub", filename = nodub_path, extra = "Overview with doublets removed.", force = T)
+save_feature_plots( dge, results_path, 
+                    gene_list = c( "ident", genes_in_order ), 
+                    gene_list_name = "before", types = "pdf_no_leg" )
+
+save_feature_plots( dge_no_dub, results_path, 
+                    gene_list = c( "ident", genes_in_order ), 
+                    gene_list_name = "after", types = "pdf_no_leg" )
+
+```
+

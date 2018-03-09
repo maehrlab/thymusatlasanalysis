@@ -1,0 +1,162 @@
+
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+## FTOC exploration and subsetting
+
+Explore
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+dge_ftoc = c( "FTOC_PBSDMSO_rep1", "FTOC_PBSDMSO_rep2", "FTOC_PBSDMSO_rep3" ,
+              "FTOC_RA_rep1", "FTOC_RA_rep2", "FTOC_RA_rep3" ) %>%
+  load_thymus_profiling_data %>% dge_merge_list %>% seuratify_thy_data( results_path )
+dge_ftoc %<>% add_maehrlab_metadata( "eday" )
+dge_ftoc %<>% add_maehrlab_metadata( "perturbation" )
+
+all_params = expand.grid( cc_method = c( "average" ),
+                          excess_var_cutoff = c( 0.5 ),
+                          log_expr_cutoff = c( 0.1 ), 
+                          prop_genes_to_select = NA, 
+                          num_genes_to_select = NA, 
+                          var_gene_method = "seurat",
+                          num_pc =  25, 
+                          clust_method = "SNN",
+                          clust_granularities_as_string = "0.5",
+                          plot_all_var_genes = F,
+                          stringsAsFactors = F)
+dge_ftoc = explore_embeddings(dge_ftoc, file.path(results_path, "all_initial"), all_params)
+
+dge_ftoc = knn_classifier( dge_train = inventory_get( tag = "overview_clean_labeled" ) %>% readRDS, 
+                           dge_test = dge_ftoc, 
+                           ident.use = "ident",
+                           vars.all = NULL, my_transform = "PCA_20", 
+                           k = 25, reject_prop = 0.0 )
+```
+
+Remove parathyroid cells and redo TSNE
+
+```{r}
+save_feature_plots( dge_ftoc,
+                    file.path(results_path, "all"),
+                    types = c("PDF", "PDF_no_leg", "PNG_PDF_split"),
+                   gene_list = c("ident", "Pth", "Gcm2"), 
+                   gene_list_name = "Pth markers before removal" )
+dge_ftoc %<>% SubsetDataFlex("ident", "ident!='9'")
+save_feature_plots( dge_ftoc, 
+                    file.path(results_path, "all"),
+                    types = c("PDF", "PDF_no_leg", "PNG_PDF_split"),
+                   gene_list = c("ident", "Pth", "Gcm2"), 
+                   gene_list_name = "Pth markers after removal" )
+p = SeuratPie( dge_ftoc, ident.use = "classifier_ident", facet_by = "perturbation", col = fig1_cols )
+ggsave( file.path( results_path, "cell_type_props_RA_CTRL_whole_thy.pdf" ), p )
+```
+
+Save some info to give context -- treatment, replicate, RA pathway genes, classifier results.
+
+```{r}
+dir.create.nice(file.path(results_path, "all"))
+p = faceted_tsne( dge_ftoc, results_path, inner_factor = "orig.ident", outer_factor = "perturbation" ) + 
+  scale_color_manual( values = c( RA_FTOC_colors, "all" = "black" ) ) + coord_fixed()
+ggsave( filename = file.path(results_path, "all", "faceted_tsne.pdf"), plot = p, width = 8, height = 7 )
+
+
+dge_ftoc %>% save_feature_plots(file.path(results_path, "all"),
+                                cols.use = RA_FTOC_colors, 
+                                types = c("PDF", "PDF_no_leg", "PNG_PDF_split"),
+                                gene_list = "perturbation",
+                                gene_list_name = "metadata")
+
+dge_ftoc %>% save_feature_plots(file.path(results_path, "all"),
+                                cols.use = fig1_cols, 
+                                types = c("PDF", "PDF_no_leg", "PNG_PDF_split"),
+                                gene_list = "classifier_ident",
+                                gene_list_name = "metadata")
+
+dge_ftoc %>% save_feature_plots(file.path(results_path, "all"),
+                                types = c("PDF", "PDF_no_leg", "PNG_PDF_split"),
+                                cols.use = "grey",
+                                gene_list = "plain_grey",
+                                gene_list_name = "metadata")
+
+dge_ftoc %>% save_feature_plots(file.path(results_path, "all"),,
+                                types = c("PDF", "PDF_no_leg", "PNG_PDF_split"),
+                                gene_list = get_RA_genes(small_list = T),
+                                gene_list_name = "RA_related_genes")
+```
+
+Save object to be used downstream.
+
+```{r}
+# # Save and add to inventory
+dge_path = file.path(file.path(results_path, "all_pth"), 
+                     collapse_by_name(all_params[1,]), 
+                     "dge_labeled.data")
+dir.create.nice(dirname(dge_path))
+saveRDS(dge_ftoc, dge_path)
+inventory_add( tag = "FTOC_RA_CTRL_NO_BMS_dge", 
+               filename = file.path(dge_path), 
+               force = T )
+# dge_ftoc  = inventory_get( tag = "FTOC_RA_CTRL_NO_BMS_dge" ) %>% readRDS
+```
+
+#### Prepare TECs for downstream analysis
+
+```{r}
+dge_ftoc_tec = dge_ftoc %>% SubsetDataFlex("classifier_ident", "substr(classifier_ident, 1, 3) == 'TEC'")
+
+all_params = expand.grid( cc_method = c( "average" ),
+                          excess_var_cutoff = c( 0.5 ),
+                          log_expr_cutoff = c( 0.1 ), 
+                          prop_genes_to_select = NA, 
+                          num_genes_to_select = NA, 
+                          var_gene_method = "seurat",
+                          num_pc =  15, 
+                          clust_method = "SNN",
+                          clust_granularities_as_string = "0.5",
+                          plot_all_var_genes = F,
+                          stringsAsFactors = F)
+dge_ftoc_tec = explore_embeddings(dge_ftoc_tec, file.path(results_path, "TEC"), all_params)
+```
+
+Remove blood doublets
+ 
+```{r}
+dge_ftoc_tec %<>% DBClustDimension(G.use = 4)
+dge_ftoc_tec@data.info$DBclust.ident %<>% as.character
+save_feature_plots( dge_ftoc_tec,
+                    file.path(results_path, "TEC"),
+                    types = c("PDF", "PDF_no_leg", "PNG_PDF_split"),
+                    gene_list = c("DBclust.ident", "res.0.5", "Ptprc", "Plac8"), 
+                    gene_list_name = "blood markers before removal" )
+dge_ftoc_tec = SubsetDataFlex(dge_ftoc_tec, "DBclust.ident", "DBclust.ident!=3" )
+save_feature_plots( dge_ftoc_tec,
+                    file.path(results_path, "TEC"),
+                    types = c("PDF", "PDF_no_leg", "PNG_PDF_split"),
+                    gene_list = c("ident", "Ptprc", "Plac8"), 
+                    gene_list_name = "blood markers after removal" )
+save_feature_plots( dge_ftoc_tec,
+                    file.path(results_path, "TEC"),
+                    types = c("PDF", "PDF_no_leg", "PNG_PDF_split"),
+                    gene_list = c("perturbation"), 
+                    cols.use = RA_FTOC_colors,
+                    gene_list_name = "metadata" )
+```
+
+Save object for use downstream
+
+```{r}
+dge_path = file.path(results_path, 
+                      "TEC", 
+                      collapse_by_name(all_params[1,]), 
+                      "dge_no_dub.data")
+dge_ftoc_tec %>% saveRDS(dge_path)
+inventory_add( tag = "dge_FTOC_RA_CTRL_NO_BMS_tec", 
+               filename = file.path(dge_path), 
+               force = T )
+```

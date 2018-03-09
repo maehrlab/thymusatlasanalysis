@@ -1,0 +1,21 @@
+
+#### Check NKT compartment sizes
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+dge_ftoc_Tcell = inventory_get( tag = "FTOC_RA_all_dge" ) %>% readRDS
+dge_ftoc_Tcell %<>% SubsetDataFlex(vars.use = "classifier_ident", "classifier_ident %in% c('Tcell', 'CLP', paste0('BLD', 1:4))")
+
+de_RA_ctrl = DiffExpByType( dge_ftoc_Tcell, 
+                            treatment_field = "perturbation", 
+                            treatment_1 = "RA", treatment_2 = "CTRL", 
+                            cell_type_var = "classifier_ident")
+SaveMarkerTables( de_RA_ctrl,  results_path, filter_name = "RA" )
+
+de_BMS_ctrl = DiffExpByType( dge_ftoc_Tcell,
+                             treatment_field = "perturbation", 
+                             treatment_1 = "BMS", treatment_2 = "CTRL", 
+                             cell_type_var = "classifier_ident")
+SaveMarkerTables( de_BMS_ctrl, results_path, filter_name = "BMS" )
+```

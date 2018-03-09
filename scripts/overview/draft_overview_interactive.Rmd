@@ -1,0 +1,43 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+####Setup
+
+Get data; set up colors as in overview tSNE
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )  
+
+
+dge = freezr::inventory_get( tag = "overview_clean_labeled" ) %>% readRDS
+dge@raw.data = matrix()
+dge@scale.data = matrix()
+EBI2_network_genes = read.csv("../../tables/EBI2_network_genes.csv", stringsAsFactors = F)[[1]]
+save_feature_plots( dge, results_path,
+                    gene_list = EBI2_network_genes,
+                    gene_list_name = "EBI2_network_genes", types = "pdf_no_leg")
+
+X = make_heatmap_for_table( dge,
+                            genes_in_order = EBI2_network_genes,
+                            ident.use = "ident", 
+                            aggregator = prop_nz,
+                            normalize = "none", 
+                            return_type = "table")
+
+Y = make_heatmap_for_table( freezr::inventory_get( tag = "TECS_12_P0_bag_labeled" ) %>% readRDS,
+                            genes_in_order = EBI2_network_genes,
+                            ident.use = "cell_type", 
+                            aggregator = prop_nz,
+                            normalize = "none", 
+                            return_type = "table")
+Z = cbind(X[, "BLD4"], Y[, paste0("TEC", 1:7)])
+Z %<>% multiply_by( 100 ) %>% round
+Z = Z[ Z %>% dist %>% hclust %>% extract2("order"), ]
+colnames(Z) = c("Myeloid", "mTEC_K5", "mTEC_early", "mTEC_Aire", "cTEC_4", "cTEC_3", "cTEC_2", "cTEC_1")
+Z
+```
+

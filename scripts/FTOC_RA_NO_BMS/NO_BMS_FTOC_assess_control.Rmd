@@ -1,0 +1,174 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+## FTOC versus *in vivo* data
+
+
+
+Assemble a big dge with ctrl and atlas.
+The postconditions of this chunk are that cell_type should store the ident for the atlas 
+and the classifier ident for the FTOC.
+Also, edayXsource_tissue stores an interaction between eday and FTOC/in vivo.
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+dge_ftoc_ctrl = inventory_get("FTOC_RA_CTRL_NO_BMS_dge") %>% readRDS
+dge_ftoc_ctrl %<>% SubsetDataFlex("perturbation", "perturbation=='CTRL'"); gc()
+dge_atlas = inventory_get("overview_clean_labeled") %>% readRDS
+rename = plyr::rename
+ct_atlas = FetchData( dge_atlas,     "ident" )            %>% rename(c("ident"="cell_type"))
+ct_ctrl  = FetchData( dge_ftoc_ctrl, "classifier_ident" ) %>% rename(c("classifier_ident"="cell_type"))
+ct_all = rbind(ct_atlas, ct_ctrl)
+my_dge_list = list( dge_ftoc_ctrl, dge_atlas ) %>% lapply(deseuratify_raw_data)
+rm(dge_atlas, dge_ftoc_ctrl); gc()
+dge_atlas_plus_ctrl_ftoc = dge_merge_list(my_dge_list) 
+rm(my_dge_list); gc()
+dge_atlas_plus_ctrl_ftoc %<>% seuratify_thy_data(min.genes = 0, min.cells = 0)
+dge_atlas_plus_ctrl_ftoc %<>% AddMetaData(ct_all, col.name = "cell_type")
+dge_atlas_plus_ctrl_ftoc %<>% add_maehrlab_metadata("eday")
+dge_atlas_plus_ctrl_ftoc %<>% add_maehrlab_metadata("source_tissue")
+dge_atlas_plus_ctrl_ftoc %<>% add_edayXother( other = "source_tissue", other_levels = c("embryo", "FTOC"))
+
+
+
+all_params = expand.grid( cc_method = c( "average" ),
+                          excess_var_cutoff = c( 0.5 ),
+                          log_expr_cutoff = c( 0.1 ), 
+                          prop_genes_to_select = NA, 
+                          num_genes_to_select = NA, 
+                          var_gene_method = "seurat",
+                          num_pc =  25, 
+                          clust_method = "SNN",
+                          clust_granularities_as_string = "0.5",
+                          plot_all_var_genes = F,
+                          stringsAsFactors = F)
+dge_atlas_plus_ctrl_ftoc %<>% explore_embeddings( results_path, all_params )
+dge_path = file.path( results_path, collapse_by_name(all_params[1, ]), "dge.data" )
+inventory_add(tag = "dge_atlas_plus_ctrl_ftoc", 
+              filename = dge_path, 
+              force = T)
+# dge_atlas_plus_ctrl_ftoc = inventory_get("dge_atlas_plus_ctrl_ftoc") %>% readRDS
+```
+
+##### Remove some days
+
+We will compare the FTOC with the parallel *in vivo* development from 13.5 (FTOC extraction) to 16.5 (FTOC sequencing).
+
+```{r}
+levels_FTOC_correctly_positioned = dge_atlas_plus_ctrl_ftoc@data.info$edayXsource_tissue %>% levels %>% sort
+dge_atlas_plus_ctrl_ftoc@data.info$edayXsource_tissue %<>% factor(levels = levels_FTOC_correctly_positioned )
+dge_atlas_plus_ctrl_ftoc %<>% SubsetDataFlex("eday", "eday %in% (13:16 + 0.5)")
+gc()
+```
+
+#### Cell type proportions 
+
+```{r}
+p = SeuratPie( dge = dge_atlas_plus_ctrl_ftoc, 
+               ident.use = "cell_type", 
+               facet_by = "edayXsource_tissue", 
+               main = "FTOC", col = fig1_cols, drop_levels = T ) + facet_wrap("edayXsource_tissue", nrow = 2)
+ggsave(file.path(results_path, "ident_by_day.pdf"), p, width = 9, height = 10)
+```
+
+#### Heatmap of selected markers
+
+```{r}
+requested_genes = c("H2-Aa", "Cd74",
+                    "Ubd", "Aire", "Tbata", "Ctsl", "Prss16", "Psmb11",
+                    "Foxn1", "Nfkbia", "Krt17", "Krt8","Epcam", "Il7", "Krt5",
+                    "Pdgfra", "Esam",
+                    "Ptprc", "Plac8",
+                    "Lyz2", "Itgax", "Klrd1", "Klrb1c", 
+                    "Cd8a", "Cd4", "Rag1", "Rag2",  "Ptcra","Cd3d", "Cd3e", "Cd3g", "Kit")
+
+x = dge_atlas_plus_ctrl_ftoc %>% FetchData(c("eday", "source_tissue", "cell_type")) %>% interaction( drop = T) %>% as.character
+y = dge_atlas_plus_ctrl_ftoc %>% FetchData(c("eday", "source_tissue")) %>% interaction( drop = T) %>% as.character
+dge_atlas_plus_ctrl_ftoc@data.info$cell_typeXsetting = x
+dge_atlas_plus_ctrl_ftoc@data.info$setting = y
+{
+  dco_types = paste0("C", 1:10)
+  dco_source = c("embryo", "FTOC")
+  dco_types  = factor(dco_types,  levels = dco_types,  ordered = T)
+  dco_source = factor(dco_source, levels = dco_source, ordered = T)
+  dco = levels(suppressWarnings(interaction(12:19 + 0.5, dco_source, dco_types)))
+}
+p = make_heatmap_for_table( dge = dge_atlas_plus_ctrl_ftoc, 
+                            genes_in_order = requested_genes,
+                            desired_cluster_order = dco, 
+                            ident.use = "cell_typeXsetting", 
+                            labels = "all")
+ggsave(file.path(results_path, "main_markers_heatmap.pdf"), p, width = 24, height = 12)
+```
+
+#### Thymocyte maturation 
+
+Subset thymocytes
+
+```{r}
+dge_atlas_plus_ctrl_ftoc %<>% SubsetDataFlex("cell_type", "cell_type %in% paste0('BLD', 1:3)")
+gc()
+```
+
+via TACS
+
+```{r}
+cutoff_CD25 = 1
+cutoff_CD44 = 0.7
+dge_atlas_plus_ctrl_ftoc@data.info$edayXsource_tissue %<>% 
+  factor(levels = sort(levels(dge_atlas_plus_ctrl_ftoc@data.info$edayXsource_tissue)))
+dge_atlas_plus_ctrl_ftoc %<>%
+  TACS(gene1 = "Il2ra", gene2 = "Cd44", cutoffs = c( cutoff_CD25, cutoff_CD44 ),
+       facet_by = "edayXsource_tissue", return_val = "seurat") 
+p_TACS_bld = dge_atlas_plus_ctrl_ftoc %>%
+  TACS(gene1 = "Il2ra", gene2 = "Cd44", cutoffs = c( cutoff_CD25, cutoff_CD44 ),
+       facet_by = "edayXsource_tissue", density = T) 
+p_TACS_bld = p_TACS_bld + facet_wrap("edayXsource_tissue", nrow = 1)
+p_TACS_bld = p_TACS_bld + scale_color_manual(values = extended_eday_ftoc_colors )
+ggsave(file.path(results_path, "p_TACS_bld.pdf"), p_TACS_bld, height = 4, width = 15)
+X = dge_atlas_plus_ctrl_ftoc %>% FetchData(c("edayXsource_tissue", "Il2ra_score", "Cd44_score"))
+
+X$Il2ra_score %<>% is_greater_than(cutoff_CD25)
+X$Cd44_score %<>% is_greater_than(cutoff_CD44)
+colnames(X)[2:3] = c("Il2ra_hi", "Cd44_hi")
+X_counts = table(X) %>% apply(1, c) %>% extract(, c("13.5.embryo", "16.5.FTOC"))
+{
+  sink(file.path(results_path, "fisher_test_tcell.txt"))
+  fisher.test( X_counts, hybrid = T ) %>% print
+  print("Cell count:")
+  X_counts %>% sum
+  sink()
+}
+write.table(table(X) %>% as.data.frame(), file.path(results_path, "Tcell_counts.txt"), quote = F)
+write.table(X_counts, file.path(results_path, "Tcell_counts_tested.txt"), quote = F)
+
+```
+
+#### Thymocyte maturation 
+
+via fractional identities 
+
+```{r}
+
+eefc = extended_eday_ftoc_colors
+names(eefc) %<>% make.names
+fi_out = display_fractional_identity( dge_test  = dge_atlas_plus_ctrl_ftoc, 
+                                      dge_train = dge_atlas_plus_ctrl_ftoc %>%
+                                        SubsetDataFlex( "source_tissue", "source_tissue=='embryo'" ),
+                                      main = "FTOC maturity (thymocytes only)",
+                                      ident.use = "eday",
+                                      test.ident.use = "edayXsource_tissue",
+                                      test.col = eefc,
+                                      genes.use = NULL )
+
+
+ggsave( file.path( results_path, "fractional_identities_thymocyte_FTOC_identities_hidden.pdf" ), 
+        fi_out$plot,
+        width = 8, height = 2.5 )
+```
+
+

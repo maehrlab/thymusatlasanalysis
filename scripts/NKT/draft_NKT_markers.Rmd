@@ -1,0 +1,271 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+#### Retrieve data
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+dge_atlas_NKT = inventory_get("NKT_atlas_with_tcr_cl_bag") %>% readRDS
+```
+
+
+#### Find cluster markers 
+
+
+```{r}
+cell_types = FetchData(dge_atlas_NKT, "ident")[[1]] %>% unique %>% as.character %>% sort
+de_gene_tables = mapply( FindMarkersFlex,
+                         ident.1 = cell_types,  
+                         SIMPLIFY = F,
+                         MoreArgs = list(object = dge_atlas_NKT, ident.use = "ident" ) )
+names( de_gene_tables ) = cell_types
+
+```
+
+
+```{r}
+de_gene_tables %<>% lapply( tidy_marker_table )
+de_gene_tables %<>% lapply( subset, `-log10q` > 2) 
+
+#### Save tables and plots after various filters
+save_all_lists = function( filter_name = "all", filter_predicate="TRUE" ){
+  my_rp = file.path(results_path, "markers")
+  dir.create.nice(file.path(my_rp, filter_name) )
+  my_subset = function(x) subset(x, eval(parse(text=filter_predicate)))
+  de_gene_tables_filtered = lapply(de_gene_tables, my_subset )
+  mapply( write.table, de_gene_tables_filtered, 
+          file.path(file.path(my_rp, filter_name), names( de_gene_tables ) %>% paste0(".txt")),
+          row.names = F, quote = F, col.names = T, sep = "\t")
+}
+
+
+save_all_lists()
+inventory_add( filename = file.path( results_path, "markers", "all"), 
+               tag = "NCL_subcluster_markers", 
+               extra = "Differential expression test results within NCLs.",
+               force = T )
+
+# Save featureplots for all the markers
+de_gene_tables %>% lapply(extract2, "gene") %>% Reduce(f=union) %>%
+  save_feature_plots( dge = dge_atlas_NKT, 
+                      results_path = results_path, 
+                      gene_list = ., 
+                      gene_list_name = "nkt_markers_pairwise_fdr_0_01", 
+                      types = "PDF")
+
+de_gene_tables %>% lapply(subset, gene %in% get_cell_surface_genes(), select = "gene", drop = T) %>% Reduce(f=union) %>%
+  save_feature_plots( dge = dge_atlas_NKT, 
+                      results_path = results_path, 
+                      gene_list = ., 
+                      gene_list_name = "nkt_markers_receptors", 
+                      types = "PDF")
+```
+
+
+### Plot results
+
+```{r}
+# # Use this fragment if you decide to split this code into another Rmd.
+# de_gene_tables =
+#   inventory_get("NCL_subcluster_markers") %>%
+#   list.files(full.names = T) %>%
+#   lapply(read.table, header = T, stringsAsFactors = T)
+# names( de_gene_tables ) =
+#   inventory_get("NCL_subcluster_markers") %>%
+#   list.files(full.names = F) %>%
+#   sapply(strip_suffix, ".txt")
+
+
+```
+
+#### Heatmap data-driven markers
+
+```{r}
+genes_dd_heatmap_hi = de_gene_tables %>%
+  lapply( dplyr::top_n, n = 5, wt = avg_diff ) %>%
+  lapply( extract2, "gene") %>% Reduce(f=union)
+genes_dd_heatmap_lo = de_gene_tables %>%
+  lapply( dplyr::top_n, n = 5, wt = -avg_diff ) %>%
+  lapply( extract2, "gene") %>% Reduce(f=union)
+genes_dd_heatmap = union(genes_dd_heatmap_lo, genes_dd_heatmap_hi)
+genes_dd_heatmap = make_heatmap_for_table( dge_atlas_NKT,
+                                           ident.use = "ident",
+                                           desired_cluster_order = cell_types,
+                                           genes_in_order = genes_dd_heatmap, 
+                                           return_type = "table" ) %>% OrderRowsForHeatmap
+# genes_dd_heatmap = genes_dd_heatmap[hclust(dist(genes_aggregated))$order]
+
+p =  make_heatmap_for_table( dge_atlas_NKT, 
+                             ident.use = "ident",
+                             desired_cluster_order = cell_types,
+                             genes_in_order = genes_dd_heatmap,
+                             labels = "all") + 
+  scale_fill_gradientn( colors = blue_gray_red )
+ggsave(file.path(results_path, "NCL_heatmap_datadriven.pdf"), p, height = 10, width = 7)
+```
+
+#### Heatmap and featureplot curated markers
+
+```{r}
+
+genes_curated = union(get_nkt_genes(), get_LTi_genes() ) 
+genes_curated %<>% union(c("Gzmb", 
+                           "Il7r",
+                           "Itgb7",
+                           "Itga4",
+                           "Ccr9",
+                           "Csf2",
+                           "Lef1",
+                           "Tnfsf11",
+                           "Sox13",
+                           "Cd44",
+                           "Thy1",
+                           "Itgam"))
+genes_curated %<>% setdiff( genes_dd_heatmap )
+
+save_feature_plots( dge_atlas_NKT, results_path = file.path(results_path, "NKT"),
+                    types = c("pdf", "pdf_no_leg", "pdf_png_split"), gene_list_name = "NKT_LTI_genes",
+                    gene_list = genes_curated)
+
+dco = paste0( "NCL", 1:NUM_CLUSTERS )
+genes_curated = make_heatmap_for_table( dge = dge_atlas_NKT,
+                                        ident.use = "ident",
+                                        genes_in_order = genes_curated, 
+                                        desired_cluster_order = dco,
+                                        return_type = "table" ) %>% OrderRowsForHeatmap( wrap = T )
+p =  make_heatmap_for_table( dge_atlas_NKT, 
+                             ident.use = "ident",
+                             genes_in_order = genes_curated, 
+                             desired_cluster_order = dco,
+                             labels = "all") + scale_fill_gradientn( colors = blue_gray_red )
+ggsave(file.path(results_path, "NCL_heatmap_handpicked.pdf"), p, height = 10, width = 7)
+
+```
+
+#### Save enrichr results
+
+```{r}
+positive_markers = lapply(de_gene_tables, subset, avg_diff > 0, select = "gene", drop = T) %>% lapply(as.character)
+p = make_go_heatmap( cluster_markers = positive_markers, num_genes_tested = nrow(dge_atlas_NKT@data) )
+p = p + theme(axis.text.x = element_text(angle = 45))
+p = p + scale_fill_continuous(low = "white", high = "blue")
+ggsave( file.path( results_path, "go_heatmap_filter_lax.pdf" ), p, width = 9, height = 11 )
+
+
+positive_markers = lapply( de_gene_tables, subset, avg_diff > 0 )
+positive_markers %<>% lapply(dplyr::top_n, n = 50, wt = avg_diff )
+positive_markers %<>% lapply(extract2, "gene")
+positive_markers %<>% lapply(as.character)
+p = make_go_heatmap( cluster_markers = positive_markers, num_genes_tested = nrow(dge_atlas_NKT@data) )
+p = p + theme(axis.text.x = element_text(angle = 45))
+p = p + scale_fill_continuous(low = "white", high = "blue")
+ggsave( file.path( results_path, "go_heatmap_top_50.pdf" ), p, width = 9, height = 11 )
+```
+
+#### Planning surface markers to barcode
+
+```{r}
+# Save surface receptors
+mysort = function(X){
+  X$pct1_by_pct2 =  X$pct.1 / X$pct.2
+  X = X[order(-X$pct1_by_pct2, -X$pct.1),]
+  X$pct1_by_pct2 %<>% round(1)
+  return(X)
+}
+my_cluster = function(X, cluster){
+  X$cluster = cluster
+  return(X)
+}
+receptors = de_gene_tables %>% 
+  lapply( subset, gene %in% get_cell_surface_genes() ) %>%
+  lapply( subset, avg_diff > 0 ) %>%
+  lapply( mysort ) %>%
+  mapply(my_cluster, X = ., cluster = names(de_gene_tables), SIMPLIFY = F) %>%
+  Reduce( f = rbind ) 
+write.table( receptors, file.path(results_path, "NCL_surface_receptors.tsv"), 
+             quote = F, row.names = F, col.names = T, sep = "\t")
+save_feature_plots( dge = dge_atlas_NKT, 
+                    results_path = results_path, 
+                    gene_list = receptors$gene, 
+                    gene_list_name = "receptors_unfiltered", 
+                    types = "pdf_no_leg",
+                    cols.use = yellow_red)
+
+```
+
+
+#### IF/FACS planning: filter for cluster-specific genes
+
+```{r}
+
+all_markers = de_gene_tables %>% lapply(extract2, "gene") %>% Reduce(f=union) 
+is_specific = IsSpecific( dge_target = dge_atlas_NKT, 
+                          dge_reference = 
+                            inventory_get(tag = "overview_clean_labeled") %>% 
+                            readRDS %>% 
+                            SubsetDataFlex("ident", "ident != 'BLD5' "),
+                          ident.use = "ident",
+                          genes = all_markers, 
+                          tol = 0.1 )
+
+is_specific_bld = IsSpecific( dge_target = dge_atlas_NKT, 
+                              dge_reference = 
+                                inventory_get(tag = "overview_clean_labeled") %>% 
+                                readRDS %>% 
+                                SubsetDataFlex("ident", "ident %in% paste0('BLD', c(1:4, 6)) "),
+                              ident.use = "ident",
+                              genes = all_markers, 
+                              tol = 0.1 )
+
+save_all_lists( filter_name = "BLD5_specific_whole_thymus", filter_predicate="is_specific[gene]" )
+save_all_lists( filter_name = "BLD5_specific_blood",        filter_predicate="is_specific_bld[gene]" )
+
+# Save featureplots for markers not expressed outside BLD5, on the atlas
+save_feature_plots( dge = inventory_get(tag = "overview_clean_labeled") %>% readRDS , 
+                    results_path = results_path, 
+                    gene_list = names(which(is_specific)), 
+                    gene_list_name = "nkt_markers_specific", types = "pdf_no_leg")
+save_feature_plots( dge = 
+                      inventory_get(tag = "overview_clean_labeled") %>% 
+                      readRDS %>% 
+                      SubsetDataFlex("ident", "ident %in% paste0('BLD', c(1:6)) "), 
+                    results_path = results_path, 
+                    gene_list = names(which(is_specific_bld)), 
+                    gene_list_name = "nkt_markers_specific_within_blood", types = "pdf_no_leg")
+
+
+# Save featureplots for markers not expressed outside BLD5, just in BLD5
+save_feature_plots( dge = dge_atlas_NKT,
+                    results_path = results_path, 
+                    gene_list = names(which(is_specific)), 
+                    gene_list_name = "nkt_markers_specific_shown_in_nkt", types = "pdf_no_leg")
+save_feature_plots( dge = dge_atlas_NKT, 
+                    results_path = results_path, 
+                    gene_list = names(which(is_specific_bld)), 
+                    gene_list_name = "nkt_markers_specific_within_blood_shown_in_nkt", types = "pdf_no_leg")
+
+rename_files = function(dest, new_suffix, old_suffix = "_no_leg.pdf"){
+  old_names = list.files(dest)
+  new_names = old_names %>% 
+    sapply( strip_suffix, old_suffix ) %>%
+    sapply( strip_suffix, new_suffix ) %>%  #this step makes it idempotent
+    paste0( new_suffix ) 
+  old_names  = file.path(dest, old_names)
+  new_names  = file.path(dest, new_names)
+  mapply(file.rename, from = old_names, to = new_names )
+  return()
+}
+rename_files( file.path(results_path, "feature_plots", "nkt_markers_specific_shown_in_nkt", "TSNE"),
+              new_suffix = "_BLD5.pdf" )
+rename_files( file.path(results_path, "feature_plots", "nkt_markers_specific_within_blood_shown_in_nkt", "TSNE"), 
+              new_suffix = "_BLD5.pdf"  )
+
+rename_files( file.path(results_path, "feature_plots", "nkt_markers_specific", "TSNE"), 
+              new_suffix = "_atlas.pdf" )
+rename_files( file.path(results_path, "feature_plots", "nkt_markers_specific_within_blood", "TSNE"), 
+              new_suffix = "_blood.pdf", old_suffix = "_atlas.pdf")
+```

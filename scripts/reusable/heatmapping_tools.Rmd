@@ -1,0 +1,259 @@
+
+---
+title: "Cleaning the DGE Data"
+author: "Eric Kernfeld"
+date: "September 7, 2016"
+output: html_document
+---
+
+###Setup 
+
+This chunk sets up the file system and some functions to retrieve reference tables. It also loads in some useful packages and sets up a few hand-picked color schemes. 
+
+You may need to edit the first few lines depending on where your data reside(s).
+
+
+### Heatmapping tools
+
+##### For small heatmaps
+
+```{r}
+
+#' Given a column ordering, produce a pleasing row ordering.
+#'
+#' @param X Set of data to order. Coerced to dataframe.
+#' @param wrap Logical. Treat column n as a neighbor of column 1?
+#' @param outlier_cutoff Numeric vector of length 1. See details.
+#' @param REORDERFUN_outlier Function accepting a df X and returning a vector of indices. 
+#' See details.
+#' @param ... Extra args passed to REORDERFUN_outlier. 
+#'
+#' @return Returns a permutation of rownames(X).
+#'
+#' This function attempts to order rows for a heatmap to match a given column ordering. 
+#' It attempts to create diagonal structure and it pays attention to which columns are adjacent.
+#' The algorithm first orders by where the max value occurs: if row Alice peaks in column 1 and 
+#' row Bob peaks in column 2, then Alice will precede Bob in the final ordering.
+#' If Bob and Cassandra both peak in column 2, then the tiebreaker is column 3 minus column 1.
+#' A version under development will attempts to detect cases such as David, who peaks in column 1 but also has
+#' large values in columns 4 and 5. These outliers will be placed separately at the end with an ordering 
+#' created by REORDERFUN_outlier.
+#'
+#' @export
+#'
+OrderRowsForHeatmap = function( X, 
+                                outlier_cutoff = 0.2, 
+                                wrap = T,
+                                REORDERFUN_outlier = function(x, ...) {
+                                  x %>% dist %>% hclust %>% as.dendrogram %>% (stats::reorder)
+                                }, ... ){
+  X %<>% as.data.frame
+  
+  # Calculate max for each row.
+  idx_max = apply(X, 1, which.max)
+  idx_max_ctr   = cbind( 1:nrow(X), idx_max )
+  idx_max_left  = cbind( 1:nrow(X), idx_max - 1 )
+  idx_max_right = cbind( 1:nrow(X), idx_max + 1 )
+  
+  if( wrap ){
+    # Alter indices: 0 becomes n, n+1 become
+    has_neighbor_left  = rep( T, length( idx_max ) )
+    has_neighbor_right = rep( T, length( idx_max ) )
+    replace_a_with_b = function( x, a, b ){x[x==a]=b; return(x)}
+    ncx = ncol(X)
+    idx_max_left[, 2] %<>% replace_a_with_b( a = 0, b = ncx) %>% replace_a_with_b( a = ncx+1, b = 1)
+    idx_max_right[, 2] %<>% replace_a_with_b( a = 0, b = ncx) %>% replace_a_with_b( a = ncx+1, b = 1)
+  } else {
+    # Remove indices referring to nonexistent entries
+    has_neighbor_left  = ( idx_max!=1 )
+    has_neighbor_right = ( idx_max!=ncol( X ) )
+    idx_max_left  = idx_max_left[  has_neighbor_left, ]
+    idx_max_right = idx_max_right[ has_neighbor_right, ]
+  }
+  
+  # Calculate scores to order by
+  major_score = idx_max
+  minor_score = rep(0, length(major_score))
+  minor_score[has_neighbor_left ] %<>% subtract( X[idx_max_left ] )
+  minor_score[has_neighbor_right] %<>% add(      X[idx_max_right] )
+  
+  return(rownames(X)[order(major_score, minor_score, decreasing = F)])
+  
+  # Treatment of outlier rows is not yet implemented.
+  # get_outlier_score = function( x, max_idx ){
+  #   away_from_max = subset(seq_along(x), abs( seq_along(x) - max_idx ) > 1 ) 
+  #   sum(x[away_from_max]) / sum(x)
+  # }
+  
+}
+
+```
+
+##### Add colorbars to ggplots
+
+```{r}
+#' Add a colourbar to a ggplot object, fixing the fill to allow a separate colorscale. 
+#' 
+gg_add_colorbar = function( plot, 
+                            x, 
+                            my_labels,
+                            col = NULL,
+                            width_ = 0.1, 
+                            position = -0.1, 
+                            is_horiz = T ){
+  my_labels %<>% make.names
+  unique_labels = my_labels %>% unique
+  if( is.null( col ) ){
+    col = setNames( 
+      scales::hue_pal()( my_labels %>% unique %>% length ),
+      my_labels %>% unique %>% make.names 
+    )
+  } else {
+    if( !all( unique_labels %in% names( col ) ) ){
+      warning( "col should be named with some permutation of unique(make.names(my_labels)).\n" )
+    }
+  }
+  
+  colourbar_obs = data.frame( my_labels = my_labels, x = x, position = position - 0.1*replace_with_int_rank(my_labels) )
+  n = nrow(colourbar_obs)
+  for( cluster in unique_labels ){
+    if( is_horiz ){
+      plot = plot + 
+        geom_tile( data = subset( colourbar_obs, my_labels == cluster ),
+                   mapping = aes( x = x, y = position ), 
+                   height = width_,
+                   fill = col[cluster] ) 
+      # geom_density( data = subset( colourbar_obs, my_labels == cluster ),
+      #               mapping = aes( x = x, y = -n*0.2*..density.. ),
+      #               fill = col[cluster], alpha = 0.5 )
+    } else {
+      plot = plot +
+        geom_tile( data = subset( colourbar_obs, my_labels == cluster ),
+                   mapping = aes( y = x, x = position),
+                   width = width_,
+                   fill = col[cluster] ) 
+    }
+  }       
+  return(plot)
+}
+```
+
+##### For large heatmaps
+
+```{r}
+
+#' Return a cell ordering where predefined clusters remain contiguous.
+#' 
+OrderCellsWithinClusters = function( dge, ident.use, coords.use = paste0("PC", 1:30) ){
+  
+  # The implementation scheme here is to apply a series of permutations,
+  # first to order the cells by cluster and then to order the cells within each cluster.
+  # At the end, I can produce a single reordering equivalent to the composition of the
+  # steps described above. To do that, I'll keep track of the original position.
+  
+  # Set up df with ident and original position
+  clusters_and_orig_pos = Seurat::FetchData(dge, ident.use)
+  clusters_and_orig_pos[["orig_pos"]] = seq_along(clusters_and_orig_pos[[ident.use]])
+  
+  # Make clusters contiguous
+  clusters_and_orig_pos = clusters_and_orig_pos[order(clusters_and_orig_pos[[ident.use]]), ]
+  # Reorder each cluster
+  for( cluster in unique( clusters_and_orig_pos[[ident.use]] ) ){
+    this_cluster_idx_current = which( clusters_and_orig_pos[[ident.use]] == cluster )
+    this_cluster_idx_orig = clusters_and_orig_pos[this_cluster_idx_current, "orig_pos"]
+    this_cluster_coords = FetchData(dge, coords.use)[this_cluster_idx_orig, ]
+    this_cluster_reordering = this_cluster_coords %>% dist %>% (fastcluster::hclust) %>% extract2("order")
+    this_cluster_idx_new = this_cluster_idx_current[this_cluster_reordering]
+    clusters_and_orig_pos[this_cluster_idx_current, ] = clusters_and_orig_pos[this_cluster_idx_new, ] 
+  }
+  
+  # Return a reordering that works in one shot.
+  return( clusters_and_orig_pos[["orig_pos"]] )
+}
+
+#' Save a big PDF file to `<results_path>/<main>.pdf` containing a heatmap of gene expression levels.
+#' 
+#' @param dge a Seurat object
+#' @param results_path should be a character such that `dir.exists( results_path )`
+#' @param genes.use Genes to include in the heatmap. Character vector.
+#' @param main Figure title and name of saved file.
+#' @param ident.use Used to set up the ColSideColors in heatmap.2.
+#' @param cluster_colors List of colors named by levels of the FetdhData(dge, ident.use).  
+#' Used to set up the ColSideColors in heatmap.2. If you don't want any, put NULL.
+#' @param col a vector of color names for use in the main body of the heatmap.
+#' @details Each column is a cell and each row is a gene. Each gene is rescaled so that its peak expression is 1.
+#' This facilitates comparison within genes and across cells, though it's bad for comparison across genes.
+#'
+#'@export
+#'
+save_heatmap = function( dge, results_path, 
+                         genes.use = dge@var.genes, 
+                         preview_genes = get_rene_markers()[[2]],
+                         main = "heatmap_cellwise",
+                         ident.use = "ident",
+                         cluster_colors = NULL,
+                         col = blue_gray_red, 
+                         rsc = NULL ){
+  cat("Projecting PCA...\n")
+  dge %<>% ProjectPCA( do.print = F )
+  #save memory; these aren't used downstream
+  dge@raw.data = matrix()
+  dge@scale.data = matrix()
+  
+  # cat("Ordering genes...\n")
+  # genes.use = dge@pca.x.full[genes.use, ] %>% dist %>% (fastcluster::hclust) %>% extract2("order")
+  # genes.use = dge@var.genes[genes.use]
+  
+  # reorder cells and set sparse row labels
+  cat("Ordering cells...\n")
+  cell_order = OrderCellsWithinClusters( dge, ident.use = ident.use )
+  
+  # sweep out max expression level and set colorscale
+  cat("Normalizing expression...\n")
+  norm_expr = t( apply(X = dge@data[genes.use, cell_order], FUN = div_by_max, MARGIN = 1) )
+  
+  cat("Making preview... \n")
+  fname = paste0( main, "_PREVIEW.pdf" )
+  pdf( file.path( results_path, fname ) )
+  preview_genes = rownames(norm_expr) [rownames(norm_expr) %in% preview_genes] # like intersect(), but preserves order
+  preview_cells = sample( 1:ncol( norm_expr ), min( 300, ncol( norm_expr ) ) ) %>% sort
+  gplots::heatmap.2( norm_expr[preview_genes, preview_cells], 
+                     Rowv = F, 
+                     Colv = F, 
+                     dendrogram = "none",
+                     symm = F, 
+                     scale = "none", 
+                     col = col,
+                     trace = "none",
+                     xlab = "Cells", labCol = "",
+                     ylab = "Genes", labRow = "",
+                     ColSideColors = cluster_colors[ as.character(FetchData(dge, ident.use)[cell_order[preview_cells], 1]) ], 
+                     RowSideColors = rsc[preview_genes] )
+  dev.off()
+  
+  cat("Making full heatmap...\n")
+  fname = paste0( main, ".pdf" )
+  pdf( file.path( results_path, fname ) )
+  gplots::heatmap.2( norm_expr, 
+                     Rowv = F, 
+                     Colv = F, 
+                     dendrogram = "none",
+                     symm = F, 
+                     scale = "none", 
+                     col = col,
+                     trace = "none",
+                     xlab = "Cells", labCol = "",
+                     ylab = "Genes", labRow = "",
+                     ColSideColors = cluster_colors[ as.character(FetchData(dge, ident.use)[cell_order, 1]) ],
+                     RowSideColors = rsc )
+  dev.off()
+  cat("Done.\n")
+}
+
+```
+
+
+
+
+
+

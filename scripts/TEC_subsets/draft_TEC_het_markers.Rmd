@@ -1,0 +1,179 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+#### Load data
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+dge_atlas_TECs = inventory_get( tag = "TECS_12_P0_bag_labeled" ) %>% readRDS
+
+
+#### Composition over time
+p = SeuratPie(dge_atlas_TECs,  ident.use = "cell_type", col = TEC_cols ) + facet_wrap("eday", nrow = 2)
+ggsave(file.path(results_path, "TEC_composition_by_eday_merged.pdf"), p, width = 7, height = 4)
+
+save_feature_plots(dge_atlas_TECs, results_path = results_path, types = c("PDF", "pdf_no_leg"),
+                   gene_list = "cell_type", cols.use = TEC_cols,                   
+                   gene_list_name = "metadata") 
+
+TEC_genes_lit = get_TEC_genes() %>% intersect(AvailableData(dge_atlas_TECs))
+
+
+```
+
+
+
+
+#### Find subcluster markers 
+
+Each cluster against the rest
+
+```{r}
+quick_fm = function(...) FindMarkersFlex(object = dge_atlas_TECs, ident.use = "cell_type", ...)
+ct_levels = FetchData(dge_atlas_TECs, "cell_type")[[1]] %>% levels
+de_gene_tables = mapply( quick_fm, ident.1 = ct_levels, SIMPLIFY = F )
+names(de_gene_tables) = ct_levels
+```
+
+All pairwise comparisons -- not run in this version of the code; note eval=FALSE in the chunk header.
+
+```{r, eval = FALSE}
+types = factor( ct_levels, levels = ct_levels, ordered = T )
+comparisons = combn(types, 2)
+comparisons_ = matrix("", 2, choose(length(ct_levels), 2))
+comparisons_[1, ] = as.character(comparisons[1, ] )
+comparisons_[2, ] = as.character(comparisons[2, ] )
+comparisons = comparisons_
+
+de_gene_tables = mapply( quick_fm, ident.1 = comparisons[1, ],  ident.2 = comparisons[2, ],
+                         SIMPLIFY = F )
+names( de_gene_tables ) = apply(comparisons, 2, paste0, collapse = "_v_")
+```
+
+#### Filter, save, and plot marker lists
+
+```{r}
+
+### Require low FDR
+tidy_marker_table = function (X) 
+{
+    X$`-log10q` = X$q.value %>% log10 %>% multiply_by(-1)
+    X$p.value = NULL
+    X$q.value = NULL
+    X$avg_diff %<>% round(2)
+    X$pct.1 %<>% round(2)
+    X$pct.2 %<>% round(2)
+    X$`-log10q` %<>% round(2)
+    return(X)
+}
+de_gene_tables %<>% lapply( tidy_marker_table )
+de_gene_tables %<>% lapply( subset, `-log10q` > 2) 
+summaries = data.frame( num_genes_fdr_0_01 = sapply( de_gene_tables, nrow ) )
+rownames(summaries) = names(de_gene_tables)
+write.table( summaries, file.path( results_path, "gene_list_summaries.txt" ),
+             quote = F, sep = "\t", row.names = T, col.names = T )
+
+#### Save tables and plots after various filters
+save_all_lists = function( filter_name, filter_predicate ){
+  my_rp = file.path(results_path, "markers")
+  dir.create.nice(file.path(my_rp, filter_name) )
+  my_subset = function(x) subset(x, eval(parse(text=filter_predicate)))
+  de_gene_tables_filtered = lapply(de_gene_tables, my_subset )
+  mapply( write.table, de_gene_tables_filtered, 
+          file.path(file.path(my_rp, filter_name), names( de_gene_tables ) %>% paste0(".txt")),
+          row.names = F, quote = F, col.names = T, sep = "\t")
+ 
+}
+
+plot_all_lists = function( filter_name, filter_predicate ){
+  my_rp = file.path(results_path, "markers")
+  dir.create.nice(file.path(my_rp, filter_name) )
+  my_subset = function(x) subset(x, eval(parse(text=filter_predicate)))
+  de_gene_tables_filtered = lapply(de_gene_tables, my_subset)
+  de_gene_tables_filtered %>% lapply(extract2, "gene") %>% Reduce(f=union) %>%
+    save_feature_plots(gene_list = ., gene_list_name = filter_name, 
+                       dge = dge_atlas_TECs, results_path = my_rp, 
+                       types = c("pdf"))
+}
+
+
+save_all_lists( filter_name = "TF",           filter_predicate="gene %in% get_mouse_tfs()")
+save_all_lists( filter_name = "all",          filter_predicate="TRUE")
+inventory_add( filename = file.path( results_path, "markers", "all"), 
+               tag = "TEC_subcluster_markers", 
+               extra = "Differential expression test results within TECs.",
+               force = T )
+
+plot_all_lists( filter_name = "TF",           filter_predicate="gene %in% get_mouse_tfs()")
+plot_all_lists( filter_name = "all",          filter_predicate="TRUE")
+
+mapply( do_enrichr, 
+        results_path = file.path( results_path, "enrichr" ),
+        geneset = lapply(de_gene_tables, subset, avg_diff > 0, select = "gene", drop = T), 
+        geneset_name = paste0(names(de_gene_tables), "_up") )
+mapply( do_enrichr, 
+        results_path = file.path( results_path, "enrichr" ),
+        geneset = lapply(de_gene_tables, subset, avg_diff < 0, select = "gene", drop = T), 
+        geneset_name = paste0(names(de_gene_tables), "_down") )
+```
+
+#### Save surface receptors
+
+```{r}
+
+# de_gene_tables = inventory_get("TEC_subcluster_pairwise_comparisons") %>%
+#   list.files(full.names = T) %>%
+#   lapply(read.table, header =T)
+# names(de_gene_tables) = inventory_get("TEC_subcluster_pairwise_comparisons") %>%
+#   list.files(full.names = F) %>%
+#   sapply(strip_suffix, ".txt")
+  
+
+mysort = function(X){
+  X$pct1_by_pct2 =  X$pct.1 / X$pct.2
+  X = X[order(-X$pct1_by_pct2, -X$pct.1),]
+  X$pct1_by_pct2 %<>% round(1)
+  return(X)
+}
+my_cluster = function(X, cluster){
+  X$cluster = cluster
+  return(X)
+}
+
+dge_atlas = inventory_get("overview_clean_labeled") %>% readRDS
+is_TEC_specific = function(genes, tol = 0.5){
+  ident = FetchDataZeroPad(dge_atlas, "ident")[[1]]
+  X = dge_atlas@data[genes, , drop = FALSE] %>% t %>% as.matrix
+  TEC_CLUSTER_NAMES = paste0("C", 6:8)
+  TEC_mean = colMeans(X[ ident %in% TEC_CLUSTER_NAMES, , drop = F]) 
+  X = sweep(X, MARGIN = 2, STATS = TEC_mean/2, FUN = is_greater_than)
+  Z = aggregate_nice(X, ident, mean) 
+  Z = Z[setdiff(rownames(Z), TEC_CLUSTER_NAMES), , drop = F]
+  george = Z %>% apply( 2, is_less_than, tol ) %>% apply(2, all)
+  return( george )
+}
+
+receptors = de_gene_tables %>% 
+  lapply( subset, gene %in% get_cell_surface_genes() ) %>%
+  lapply( subset, avg_diff > 0 ) %>%
+  lapply( mysort ) %>%
+  mapply(my_cluster, X = ., cluster = names(de_gene_tables), SIMPLIFY = F) %>%
+  Reduce( f = rbind ) 
+receptors$is_epithelium_specific =  is_TEC_specific( receptors$gene )
+write.table( receptors, file.path(results_path, "TEC_surface_receptors.tsv"), 
+             quote = F, row.names = F, col.names = T, sep = "\t")
+
+table(receptors$cluster, receptors$is_epithelium_specific)
+
+save_feature_plots( dge_atlas_TECs,
+                    results_path = results_path, 
+                    types = c("pdf_no_leg"),
+                    gene_list = receptors %>% subset( pct1_by_pct2 > 4, select = "gene", drop = T) %>% rev ,               
+                    gene_list_name = "receptors", 
+                    cols.use = yellow_red ) 
+```

@@ -1,0 +1,110 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+#### Retrieve data
+
+How does ConvT5 compare to NCL4?
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+labels_tcell = inventory_get("Tcell_nodub")               %>% readRDS %>% FetchData("cell_type")
+labels_ncl   = inventory_get("NKT_atlas_with_tcr_cl_bag") %>% readRDS %>% FetchData("ident")
+dge_overview = freezr::inventory_get( tag = "overview_clean_labeled" ) %>% readRDS
+dge_overview@data.info$fine_labels = NA
+dge_overview@data.info[rownames(labels_ncl),   "fine_labels"] = labels_ncl  [[1]] %>% as.character
+dge_overview@data.info[rownames(labels_tcell), "fine_labels"] = labels_tcell[[1]] %>% as.character
+custom_feature_plot(dge_overview, "fine_labels")
+X = FindMarkersFlex( object = dge_overview,
+                     ident.use = "fine_labels",
+                     ident.1 = "NCL4",
+                     ident.2 = "ConvT5",
+                     thresh.use = 0.1,
+                     min.pct = 0.05 )
+X %>% save_marker_table(results_path=results_path, testname = "NCL4_ConvT5_all")
+```
+
+Is NCL4 two cell types?
+
+```{r}
+dge_ncl = inventory_get("NKT_atlas_with_tcr_cl_bag") %>% readRDS
+dge_ncl4 = dge_ncl %>% SubsetDataFlex("ident", "ident=='NCL4'")
+scramble = function( X ){
+  apply(X, 2, sample)
+}
+scramble_invariant_example = cbind(c(1,1,1), c(2,2,2), c(3,3,3) )
+assertthat::are_equal(scramble_invariant_example,
+                      scramble_invariant_example %>% scramble)
+#' Permutation test for significance of PC's. 
+#'
+#' You should put the samples (cells) as rows and features (genes) as columns.
+pca_perm = function( data, num_pc, num_perm, ...){
+  perm_sd = matrix(0, ncol = num_pc, nrow = num_perm)
+  for( i in 1:num_perm ){
+    perm_sd[i, ] = irlba::prcomp_irlba( x = scramble(data), n = num_pc, ... )$sdev
+  }
+  actual_sd = irlba::prcomp_irlba( x = data, n = num_pc, ... )$sdev
+  exceeds_actual = function( x ) x>actual_sd
+  binarized = apply(perm_sd, 1, exceeds_actual)
+  pvals = rowMeans(binarized)
+  assertthat::are_equal(length(pvals), num_pc)
+  return(pvals)
+}
+pvals = pca_perm(data = dge_ncl4@data %>% t, num_pc = 5, num_perm = 1000 )
+dge_ncl4 %<>% MeanVarPlot( x.low.cutoff = 0.1, y.cutoff = 0.5 )
+dge_ncl4 %<>% PCAFast( num_pc = 5 )
+dge_ncl4 %<>% RunTSNE( dims.use = 1:5 )
+dge_ncl4 %<>% FindClusters( pc.use = 5 )
+custom_feature_plot(dge_ncl4, "eday", cols.use = extended_eday_colors[5:8])
+dge_ncl4@pca.x[["PC2"]] %<>% multiply_by(-1)
+custom_feature_plot(dge_ncl4, "eday", axes = c("PC3", "PC2"))
+custom_feature_plot(dge_ncl4, "PC1")
+custom_feature_plot(dge_ncl4, "PC2")
+custom_feature_plot(dge_ncl4, "PC3")
+custom_feature_plot(dge_ncl4, "PC4")
+custom_feature_plot(dge_ncl4, "PC5")
+VizPCA(dge_ncl4, pcs.use = 2)
+
+f = function(gene){
+  qplot(-FetchData(dge_ncl4, "PC2"),
+        FetchData(dge_ncl4, gene), 
+        geom = c("smooth", "point"),
+        method = "lm", main = gene)
+}
+f("Cd4")
+f("Cd8a")
+f("Runx3")
+f("Zbtb7b")
+f("eday")
+f("Satb1")
+f("Cd52")
+f("Cd24a")
+f("Cd69")
+dge_ncl4 %>% FetchData(c("Cd4", "Cd69")) 
+```
+
+
+More NCL4 plots
+
+```{r}
+cd4pos_cd8lo_genes = c("Zbtb7b", "Runx3", "Cd4", "Cd8a")
+save_feature_plots( dge_overview, 
+                    results_path, types = "PDF_no_leg",
+                    gene_list = cd4pos_cd8lo_genes, 
+                    gene_list_name = "cd4pos_cd8lo_genes_overview" )
+save_feature_plots( dge_ncl %>% SubsetDataFlex("ident", "ident=='NCL4'"), 
+                    results_path, types = "PDF_no_leg",
+                    gene_list = c(cd4pos_cd8lo_genes, "eday"),
+                    gene_list_name = "cd4pos_cd8lo_genes_ncl" )
+save_feature_plots( dge_ncl %>% SubsetDataFlex("ident", "ident=='NCL4'"), 
+                    results_path, types = "PDF",
+                    gene_list = "eday",
+                    cols.use = extended_eday_colors[5:8],
+                    gene_list_name = "cd4pos_cd8lo_genes_ncl" )
+
+```
+
+

@@ -1,0 +1,100 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+# # Retrieve Seurat obj with tSNE redone 
+path_to_Seurat_obj = inventory_get( tag = "overview_clean" )
+dge = readRDS( path_to_Seurat_obj )
+annot_ident_plot(dge, results_path,figname = "clusters_before_naming", ident.use = "res.0.5" )
+
+# # These labels are out of date, but we used them internally for a long time.
+{
+  converter = c( "3" = "BLD1",  
+                 "1" = "BLD2",
+                 "0" = "BLD3",
+                 "7" = "BLD4", 
+                 "6" = "BLD5",  
+                 "2" = "TEC1",
+                 "8" = "TEC2",
+                 "4" = "TEC3",
+                 "5" = "MES",  
+                 "9" = "END")
+  dge@data.info$old_ident = converter[as.character( dge@data.info$res.0.5 )] 
+  dge %<>% SetIdent( ident.use = converter[as.character( dge@data.info$res.0.5 )] )
+  X = FetchData(dge, "old_ident") %>% (dplyr::mutate)(simple_ident = old_ident %>% as.character %>% substr(1, 3))
+  rownames(X) = rownames(FetchData(dge, "old_ident"))
+  dge %<>% AddMetaData(X)
+  annot_ident_plot(dge, results_path,figname = "clusters_old_names_1", ident.use = "ident" )
+  annot_ident_plot(dge, results_path,figname = "clusters_old_names_2", ident.use = "old_ident" )
+  annot_ident_plot(dge, results_path,figname = "clusters_simple", ident.use = "simple_ident" )
+}
+
+# Rename clusters to be consecutive on dendrogram
+{
+  dge %<>% BuildClusterTree
+  old_names = extract_tip_order(dge@cluster.tree[[1]])
+  new_names = paste0("C", 1:length(old_names))
+  converter = setNames(new_names, old_names)
+  dge %<>% SetIdent( ident.use = converter[dge@ident %>% as.character] )
+  annot_ident_plot(dge, results_path,figname = "clusters_after_naming", ident.use = "ident" )
+}
+
+# Make a map between new and old cluster labels.
+{
+  X = dge %>% FetchData( c( "res.0.5", "old_ident", "ident" ) ) 
+  X = X[!duplicated(X), ]
+  rownames(X) = NULL
+  X = X[order(X$ident), ]
+  X$res.0.5 %<>% as.character
+  X$old_ident %<>% as.character
+  X$ident %<>% as.character
+  X$color = fig1_cols_old[X$old_ident]
+  showcol(X$color) # This should match the colsidecolors on the heatmaps we already have.
+  write.table( X, file.path( results_path, "fig1_label_conversions.txt" ),
+               sep = "\t", row.names = F, col.names = T, quote = F )
+  freezr::inventory_add( inv_location = today_dest, 
+                         tag = "overview_old_labels", 
+                         filename = file.path( results_path, "fig1_label_conversions.txt" ),
+                         force = T,
+                         extra = "Correspondence between new and old cluster labels for the overview.")
+}
+
+# # Save labeled DGE and featureplot with all cells
+saveRDS( dge, file.path( results_path, "dge_labeled.data" ) )
+freezr::inventory_add( inv_location = today_dest, 
+                       tag = "overview_clean_labeled", 
+                       filename = file.path( results_path, "dge_labeled.data" ) , 
+                       force = T,
+                       extra = "Data underlying figure 1: overview with 10 named clusters.")
+# dge = freezr::inventory_get("overview_clean_labeled") %>% readRDS
+
+
+tsne_colored( dge, results_path, fig_name = "plain_grey" )
+
+p_feat = custom_feature_plot( dge, "old_ident", cols.use = fig1_cols ) + ggtitle("Main cell types")
+ggsave( filename = file.path( results_path, "overview_clean.pdf"),
+        plot = p_feat,
+        width = 8, height = 7)
+ggsave( filename = file.path( results_path, "overview_clean_no_leg.pdf"),
+        plot = p_feat + theme(legend.position = "none"),
+        width = 8, height = 7)
+
+p_eday = custom_feature_plot( dge, "eday" ) + 
+  ggtitle("Embryonic day") +
+  labs(color = "Embryonic day") + 
+  scale_color_gradientn( colors = extended_eday_colors, breaks = 12.5:19.5 )
+ggsave( filename = file.path( results_path, "overview_eday.pdf"),
+        plot = p_eday,
+        width = 8, height = 7)
+ggsave( filename = file.path( results_path, "overview_eday_no_leg.pdf"),
+        plot = p_eday + theme(legend.position = "none"),
+        width = 8, height = 7)
+
+
+```

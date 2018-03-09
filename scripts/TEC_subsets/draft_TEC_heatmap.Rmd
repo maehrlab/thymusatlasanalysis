@@ -1,0 +1,48 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+#### Load data
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+dge = inventory_get( tag = "TECS_12_P0_bag_labeled" ) %>% readRDS
+
+ident.use = "cell_type"
+cluster_colors = TEC_cols
+main = "TEC_heatmap_large"
+
+dge %<>% ProjectPCA
+genes_in_order = dge@pca.x.full[dge@var.genes, ] %>% dist %>% (fastcluster::hclust) %>% extract2("order")
+genes_in_order = dge@var.genes[genes_in_order]
+
+# reorder cells and set sparse row labels
+cell_order = dge %>% FetchData(paste0("PC", 1:30)) %>% dist %>% (fastcluster::hclust) %>% extract2("order")
+cell_clusters = Seurat::FetchData(dge, ident.use)[cell_order, 1] %>% as.character
+
+# sweep out max expression level and set colorscale
+norm_expr = t( apply(X = dge@data[genes_in_order, cell_order], FUN = div_by_max, MARGIN = 1) )
+
+{
+  print("Making heatmap...")
+  fname = paste0( main, "_heatmap2.pdf" )
+  pdf( file.path( results_path, fname ) )
+  gplots::heatmap.2( norm_expr, 
+                     Rowv = F, 
+                     Colv = F, 
+                     dendrogram = "none",
+                     symm = F, 
+                     scale = "none", 
+                     col = blue_gray_red,
+                     trace = "none",
+                     xlab = "Cells", labCol = "",
+                     ylab = "Genes", labRow = "",
+                     ColSideColors = cluster_colors[ as.character(FetchData(dge, ident.use)[cell_order, 1]) ] )
+  dev.off()
+}
+```
+

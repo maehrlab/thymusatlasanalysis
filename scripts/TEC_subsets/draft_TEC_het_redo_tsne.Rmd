@@ -1,0 +1,61 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+
+Right now, most of the heatmapping occurs in the marker-finding script that precedes this. 
+This script is for the GO term heatmaps.
+
+#### Load data
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+dge_atlas_TECs = inventory_get( tag = "TECS_12_P0_bag_labeled" ) %>% readRDS
+all_params = expand.grid( cc_method = c( "average" ),
+                          excess_var_cutoff = c( 0.5 ),
+                          log_expr_cutoff = c( 0.1 ), 
+                          prop_genes_to_select = NA, 
+                          num_genes_to_select = NA, 
+                          var_gene_method = "seurat",
+                          num_pc =  12, 
+                          clust_method = "SNN",
+                          clust_granularities_as_string = "0.5",
+                          plot_all_var_genes = F,
+                          stringsAsFactors = F)
+dge_atlas_TECs %<>% explore_embeddings( results_path = results_path, all_params)
+dge_atlas_TECs %>% custom_feature_plot("eday")
+```
+
+#### Heatmap markers (large)
+
+```{r}
+#### Choose some genes to heatmap
+de_gene_tables =
+  inventory_get("TEC_subcluster_pairwise_comparisons") %>% 
+  list.files(full.names = T) %>%
+  lapply(read.table, header = T)
+names( de_gene_tables ) = 
+  inventory_get("TEC_subcluster_pairwise_comparisons") %>%
+  list.files(full.names = F) %>%
+  sapply(strip_suffix, ".txt")
+
+positive_markers = lapply(de_gene_tables, subset, avg_diff > 0, select = "gene", drop = T, USE.NAMES = T)
+positive_markers %<>% lapply(as.character)
+p = make_go_heatmap( positive_markers, effect_measure = "overlap", num_genes_tested = nrow(dge_atlas_TECs@data) ) 
+p = p + theme(axis.text.x = element_text(angle = 45))
+p = p + scale_fill_gradient( low = "white", high = "blue")
+ggsave(file.path(results_path, "GO_heatmap_filter_lax.pdf"), p, width = 9, height = 11)
+
+
+positive_markers = lapply(de_gene_tables, dplyr::top_n, n = 50, wt = avg_diff )
+positive_markers %<>% lapply(extract2, "gene")
+positive_markers %<>% lapply(as.character)
+p = make_go_heatmap( positive_markers, effect_measure = "overlap", num_genes_tested = nrow(dge_atlas_TECs@data) ) 
+p = p + theme(axis.text.x = element_text(angle = 45))
+p = p + scale_fill_gradient( low = "white", high = "blue")
+ggsave(file.path(results_path, "GO_heatmap_top_50.pdf"), p, width = 12, height = 11)
+```

@@ -1,0 +1,446 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+## Reconsider classification of TECs
+
+Goals for this script:
+
+- Thoroughly describe the heterogeneity present within the TECs, accounting for uncertainty.
+- Generate output describing:
+    - Cluster labels to be used going forwards
+    - Exploration of clustering possibilities (e.g. different numbers of clusters; dendrogram)
+    - A large heatmap
+    - Pie charts of cluster sizes over time
+    - Marker genes and featureplots of marker genes
+
+#### Retrieve TECs; remove doublets
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+dge_atlas_TECs = inventory_get( tag = "TECS_12_p0_explore" ) %>% readRDS
+dge_atlas_TECs %<>% add_maehrlab_metadata("eday")
+
+save_feature_plots(dge_atlas_TECs, results_path, gene_list = c("Ptprc", "ident"), gene_list_name = "before_dub_removal")
+dge_atlas_TECs %<>% SubsetDataFlex( "ident", "ident != 6" )
+save_feature_plots(dge_atlas_TECs, results_path, gene_list = c("Ptprc", "ident"), gene_list_name = "after_dub_removal")
+
+dge_list = load_maehrlab_private_data(c("e16_5EpCAM_rep1", "e16_5EpCAM_rep2")) %>%
+  c(list(atlas = deseuratify_raw_data(dge_atlas_TECs)))
+dge_atlas_TECs = dge_merge_list(dge_list); rm(dge_list); gc()
+dge_atlas_TECs %<>% seuratify_thy_data()
+dge_atlas_TECs_bak = dge_atlas_TECs
+```
+
+#### Redo exploration without doublets
+
+```{r}
+all_params = expand.grid( cc_method = c( "average" ),
+                          excess_var_cutoff = c( 0.5 ),
+                          log_expr_cutoff = c( 0.1 ), 
+                          prop_genes_to_select = NA, 
+                          num_genes_to_select = NA, 
+                          var_gene_method = "seurat",
+                          num_pc =  12, 
+                          clust_method = "SNN",
+                          clust_granularities_as_string = "0.5",
+                          plot_all_var_genes = F,
+                          stringsAsFactors = F)
+dge_atlas_TECs %<>% explore_embeddings( results_path = results_path, all_params, remove_cc_genes = T)
+```
+
+#### Assign cc phases
+
+```{r}
+dge_atlas_TECs_cc = dge_atlas_TECs
+dge_atlas_TECs_cc@var.genes = 
+  Reduce(get_macosko_cc_genes(), f = union) %>% 
+  Capitalize() %>%
+  intersect(AvailableData(dge_atlas_TECs))
+dge_atlas_TECs_cc %<>% PCAFast( do.print = F, pcs.compute = 40 )
+dge_atlas_TECs_cc %>% PCElbowPlot()
+dge_atlas_TECs_cc %<>% RunTSNE(dims.use = 1:6, do.fast = T)
+custom_feature_plot(dge_atlas_TECs_cc, "PC1")
+custom_feature_plot(dge_atlas_TECs_cc, "ident")
+VlnPlot(dge_atlas_TECs_cc, "PC1")
+dge_atlas_TECs_cc %<>% ProjectPCA()
+VizPCA(dge_atlas_TECs_cc, 1:2, use.full = T)
+VizPCA(dge_atlas_TECs_cc, 1:2 + 2, use.full = T)
+VizPCA(dge_atlas_TECs_cc, 1:2 + 4, use.full = T)
+```
+
+#### Cluster only cells not CC active
+
+```{r}
+display_cc_discretized = function(prop = 0.8){
+  cutoff = quantile(FetchData(dge_atlas_TECs_cc, "PC1")[[1]], prop)
+  blah = FetchData(dge_atlas_TECs_cc, "PC1") %>%
+    vectorize_preserving_rownames() %>% 
+    is_weakly_greater_than(cutoff)
+  dge_atlas_TECs %<>% AddMetaData(blah %>% sapply(paste0, "_cc"), "is_high_cc")
+  custom_feature_plot(dge_atlas_TECs, "is_high_cc")
+}
+cells_omit = FetchData(dge_atlas_TECs_cc, "PC1") %>%
+  vectorize_preserving_rownames() %>% 
+  is_weakly_greater_than(cutoff) %>% which %>% names
+cells_use = setdiff(dge_atlas_TECs_cc@cell.names, cells_omit)
+
+```
+
+#### Fit cluster model with bagging
+
+```{r}
+NUM_CLUSTERS = 10
+dge_atlas_TECs %<>% ClusterBag( k=NUM_CLUSTERS, num_pc = 30 )
+
+annot_ident_plot(dge_atlas_TECs, results_path, ident.use = "cl_bag_assignment", figname = "clusters" )
+
+# Rename clusters to be consecutive on dendrogram
+{
+  dge_atlas_TECs %<>% SetIdent( ident.use = dge_atlas_TECs@data.info$cl_bag_assignment )
+  dge_atlas_TECs %<>% BuildClusterTree
+  old_names = extract_tip_order(dge_atlas_TECs@cluster.tree[[1]])
+  new_names = paste0("TEC", 1:NUM_CLUSTERS)
+  converter = setNames(new_names, old_names)
+  dge_atlas_TECs@data.info$cell_type      = converter[dge_atlas_TECs@data.info$cl_bag_assignment]
+  dge_atlas_TECs %<>% SetIdent( ident.use = converter[dge_atlas_TECs@data.info$cl_bag_assignment] )
+}
+
+dge_atlas_TECs %<>% BuildClusterTree
+{
+  pdf(file.path(results_path, "cluster_tree.pdf"), width = 6, height = 4)
+  PlotClusterTree(dge_atlas_TECs)
+  dev.off()
+}
+annot_ident_plot(dge_atlas_TECs, results_path, ident.use = "cell_type", figname = "clusters" )
+```
+
+#### Summary data and cluster modeling output
+
+```{r}
+
+TEC_markers = c( "Krt5", "Pvrl4", "Krt19", "Plet1", 
+                 "Pdpn", "Pax1", "Pax9", 
+                 "Ccl25", "Ackr4", "Prss16", "Psmb11",  
+                 "Dll4", "Il7", "Ly75", "Cd24a", "Epcam", 
+                 "Ly75", "Enpep","Krt8", "Krt17", "Krt14",
+                 "Cd74", "H2-Aa", "Aire", "Fezf2", "Tnfrsf11a",
+                 "Cldn3", "Cldn4", "Six1", "Six4", "Eya1" )
+
+additional = c("Cldn6", "Cldn7", "Tnfaip2", "Spink8", "Ctsh", paste0("Skint", 1:8))
+
+save_feature_plots(dge_atlas_TECs, results_path = results_path, types = c("pdf_no_leg"),
+                   gene_list = TEC_markers, gene_list_name = "genes")
+save_feature_plots(dge_atlas_TECs, results_path = results_path, types = c("pdf_no_leg"),
+                   gene_list = additional, gene_list_name = "genes")
+save_feature_plots(dge_atlas_TECs, results_path = results_path, types = c("PDF", "pdf_no_leg", "PDF_PNG_split"),
+                   gene_list = "eday", cols.use = extended_eday_colors,                   
+                   gene_list_name = "metadata") 
+save_feature_plots(dge_atlas_TECs, results_path = results_path, types = c("PDF", "pdf_no_leg", "PDF_PNG_split"),
+                   gene_list = "cell_type", cols.use = TEC_cols,                   
+                   gene_list_name = "metadata") 
+p = annot_ident_plot(dge_atlas_TECs, results_path, figname = "ident_labeled_badcol" ) + 
+          scale_color_manual(values = TEC_cols)
+ggsave( file.path( results_path, "ident_labeled.pdf" ), p )
+
+save_feature_plots(dge_atlas_TECs, results_path = results_path, types = c("PDF", "pdf_no_leg", "PDF_PNG_split"),
+                   gene_list =  paste0( "cl_bag_", c( "assignment", "confidence", 1:NUM_CLUSTERS ) ), 
+                   gene_list_name = "metadata") 
+# Check for batch/ribo effects
+dge_atlas_TECs %<>% add_rp_percentage
+dge_atlas_TECs %<>% add_maehrlab_metadata("FACS_sorting")
+save_feature_plots(dge_atlas_TECs, results_path = results_path, types = c("PDF", "pdf_no_leg"),
+                   gene_list = c( "ribo_nUMI_pct", "orig.ident", "FACS_sorting", "eday" ), 
+                   gene_list_name = "metadata") 
+```
+
+## Seeking informative TFs
+
+This series of chunks identifies informative transcription factors. The strategy is to see what aligns best with inferred latent variables, both in the whole dataset and in subsets. 
+
+#### Whole dataset
+
+```{r}
+get_similar_genes(dge_atlas_TECs, markers = "PC1", 100) %>% intersect(get_mouse_tfs())
+custom_feature_plot(dge_atlas_TECs, "Utf1")
+
+custom_feature_plot(dge_atlas_TECs, "PC2")
+get_similar_genes(dge_atlas_TECs, markers = "PC2", 100) %>% intersect(get_mouse_tfs())
+custom_feature_plot(dge_atlas_TECs, "Hes6")
+custom_feature_plot(dge_atlas_TECs, "Stat1")
+
+custom_feature_plot(dge_atlas_TECs, "PC3")
+get_similar_genes(dge_atlas_TECs, markers = "PC3", 100, 
+                  aggregator = function(x) multiply_by(x, -1)) %>% intersect(get_mouse_tfs())
+custom_feature_plot(dge_atlas_TECs, "Zfp750")
+
+custom_feature_plot(dge_atlas_TECs, "PC4")
+get_similar_genes(dge_atlas_TECs, markers = "PC4", 100, 
+                  aggregator = function(x) multiply_by(x, -1)) %>% intersect(get_mouse_tfs())
+custom_feature_plot(dge_atlas_TECs, "Btg2")
+
+custom_feature_plot(dge_atlas_TECs, "PC5")
+get_similar_genes(dge_atlas_TECs, markers = "PC5", 100, 
+                  aggregator = function(x) multiply_by(x, -1)) %>% intersect(get_mouse_tfs())
+custom_feature_plot(dge_atlas_TECs, "Ascl1")
+
+
+custom_feature_plot(dge_atlas_TECs, "cl_bag_5")
+get_similar_genes(dge_atlas_TECs, markers = "cl_bag_5", 100) %>% intersect(get_mouse_tfs())
+custom_feature_plot(dge_atlas_TECs, "Nr2f2")
+custom_feature_plot(dge_atlas_TECs, "Sox11")
+custom_feature_plot(dge_atlas_TECs, "Sox2")
+
+
+custom_feature_plot(dge_atlas_TECs, "cl_bag_6")
+get_similar_genes(dge_atlas_TECs, markers = "cl_bag_6", 100) %>% intersect(get_mouse_tfs())
+custom_feature_plot(dge_atlas_TECs, "Tcf4")
+
+
+```
+
+#### cTEC TFs
+
+```{r}
+results_path_cTEC = file.path(results_path, "cTEC")
+dge_atlas_cTEC = SubsetDataFlex( dge_atlas_TECs, 
+                                 vars.use = "cell_type", 
+                                 predicate = "cell_type %in% paste0('TEC', 6:10)" )
+tsne_colored( dge_atlas_cTEC, results_path_cTEC, colour =  "eday" ) 
+alt_params = all_params; alt_params$excess_var_cutoff = 1
+dge_atlas_cTEC %<>% explore_embeddings(results_path = results_path_cTEC, 
+                                       all_params = rbind( alt_params, 
+                                                           all_params) )
+save_feature_plots( dge_atlas_cTEC, results_path_cTEC, 
+                    gene_list = c( "Cd74", "PC1", "PC2", "PC3", "PC4", "FACS_sorting" ),
+                    gene_list_name = "general" , types = "PDF_no_leg")
+
+custom_feature_plot(dge_atlas_cTEC, "PC1")
+get_similar_genes(dge_atlas_cTEC, markers = "PC1", 
+                  aggregator = function(x) -x,
+                  100) %>% intersect(get_mouse_tfs())
+custom_feature_plot(dge_atlas_cTEC, "Stat1")
+custom_feature_plot(dge_atlas_cTEC, "Cd74")
+
+custom_feature_plot(dge_atlas_cTEC, "PC2")
+get_similar_genes(dge_atlas_cTEC, markers = "PC2", 100) %>% intersect(get_mouse_tfs())
+custom_feature_plot(dge_atlas_cTEC, "Pax1", axes = c("PC1", "PC2"))
+
+custom_feature_plot(dge_atlas_cTEC, "PC3")
+get_similar_genes(dge_atlas_cTEC, markers = "PC3", 100) %>% intersect(get_mouse_tfs())
+custom_feature_plot(dge_atlas_cTEC, "Btg2")
+custom_feature_plot(dge_atlas_cTEC, "Nfia")
+custom_feature_plot(dge_atlas_cTEC, "Nfib")
+custom_feature_plot(dge_atlas_cTEC, "Nr4a1")
+
+custom_feature_plot(dge_atlas_cTEC, "PC4")
+get_similar_genes(dge_atlas_cTEC, markers = "PC4", 100) %>% intersect(get_mouse_tfs())
+custom_feature_plot(dge_atlas_cTEC, "Nfe2l3")
+custom_feature_plot(dge_atlas_cTEC, "Zfp750")
+custom_feature_plot(dge_atlas_cTEC, "Grhl3")
+
+save_feature_plots(dge_atlas_TECs, results_path_cTEC, 
+                   gene_list = c("Stat1", "Zfp750", "Grhl3",
+                                 "Pax1",
+                                 "Btg2", "Nfia", "Nfib", "Nr4a1", "Nfe2l3", "Stat1"),
+                   gene_list_name = "selected_TFs")
+```
+
+#### mTEC TFs
+
+```{r}
+results_path_mTEC = file.path(results_path, "mTEC")
+dge_atlas_mTEC = SubsetDataFlex( dge_atlas_TECs, 
+                                 vars.use = "cell_type", 
+                                 predicate = "cell_type %in% paste0('TEC', 1:5)" )
+tsne_colored( dge_atlas_mTEC, results_path_mTEC, colour =  "eday" ) 
+dge_atlas_mTEC %<>% explore_embeddings(results_path = results_path_mTEC, all_params = all_params)
+
+#### Compare with whole-data embedding
+
+X = FetchData( dge_atlas_TECs, c( "tSNE_1", "tSNE_2" ) )
+Y = FetchData( dge_atlas_mTEC, c( "tSNE_1", "tSNE_2", "ident" ) )
+X$ident = "cTEC"
+X[rownames(Y), "ident"] = paste0("mTEC", Y$ident)
+Y$ident_= paste0("mTEC", Y$ident)
+my_cols = c("cTEC" = "grey", "mTEC0" = "red", "mTEC2" = "blue", "mTEC3" = "pink", "mTEC4" = "purple")
+p1 = ggplot(X) + geom_point(aes( x = tSNE_1, y = tSNE_2, colour = ident ))
+p2 = ggplot(Y) + geom_point(aes( x = tSNE_1, y = tSNE_2, colour = ident_ )) 
+fix_gg = function(p){
+  p + 
+    scale_color_manual(values = my_cols) + coord_fixed() + 
+    theme(axis.line   = element_blank()) + 
+    theme(axis.ticks  = element_blank()) + 
+    theme(axis.text   = element_blank()) + 
+    theme(axis.title  = element_blank()) 
+}
+p1 %<>% fix_gg
+p2 %<>% fix_gg
+ggsave(file.path(results_path_mTEC, "mTEC_clusters_highlight_on_all.pdf"), p1)
+ggsave(file.path(results_path_mTEC, "mTEC_clusters_highlight.pdf"), p2)
+
+#### Characterize mTEC clusters
+dge_atlas_mTEC %<>% add_maehrlab_metadata("FACS_sorting")
+save_feature_plots( dge_atlas_mTEC, results_path_mTEC, 
+                    gene_list = c( "Cd74", "PC1", "PC2", "PC3",  "Sparc", "PC4", "FACS_sorting" ),
+                    gene_list_name = "general" , types = "PDF_no_leg")
+
+VlnPlot(dge_atlas_mTEC, "PC4", group.by = "FACS_sorting", do.ret = T)[[1]] %>% 
+  ggsave(plot = ., file.path(results_path_mTEC, "PC4_by_FACS.pdf"), height = 8, width = 6)
+
+save_feature_plots( dge_atlas_mTEC, results_path_mTEC, 
+                    gene_list = c("Krt5", "Psmb11", "Prss16", "Krt19", "Cldn4", "Aire" ),
+                    gene_list_name = "anti_dub_evidence" , types = "PDF_no_leg")
+
+save_feature_plots( dge_atlas_mTEC, results_path_mTEC, 
+                    gene_list = c("Mybl2", "Bub1", "Plk1", "Ccnd1", "Ccne1", "Ccna1" ),
+                    gene_list_name = "cc" , types = "PDF_no_leg")
+
+save_feature_plots( dge_atlas_mTEC, results_path_mTEC, 
+                    gene_list = 
+                      get_similar_genes(dge_atlas_mTEC, c("Trp63"), 40) %>% 
+                      c(paste0("Skint", 1:10)) %>%
+                      c(TEC_markers),
+                    gene_list_name = "what_are_they" , types = "PDF_no_leg")
+
+save_feature_plots( dge_atlas_TECs, results_path_mTEC, 
+                    gene_list = get_similar_genes(dge_atlas_mTEC, c("Trp63"), 40),
+                    gene_list_name = "disqualifying_cTEC_markers" , types = "PDF_no_leg")
+
+
+custom_feature_plot(dge_atlas_mTEC, "PC1")
+get_similar_genes(dge_atlas_mTEC, markers = "PC1", 100, aggregator = function(x) -x) %>%
+  intersect(get_mouse_tfs())
+custom_feature_plot(dge_atlas_mTEC, "Aire")
+custom_feature_plot(dge_atlas_mTEC, "Utf1")
+custom_feature_plot(dge_atlas_mTEC, "Cdx1")
+custom_feature_plot(dge_atlas_mTEC, "Tcf7")
+
+custom_feature_plot(dge_atlas_mTEC, "PC2")
+get_similar_genes(dge_atlas_mTEC, markers = "PC2", 100) %>%
+  intersect(get_mouse_tfs())
+custom_feature_plot(dge_atlas_mTEC, "Zfp36")
+get_similar_genes(dge_atlas_mTEC, c("Trp63"), 100) %>%
+  intersect(get_mouse_tfs())
+
+custom_feature_plot(dge_atlas_mTEC, "PC3")
+get_similar_genes(dge_atlas_mTEC, markers = "PC3", 200) %>%
+  intersect(get_mouse_tfs())
+custom_feature_plot(dge_atlas_mTEC, "Zfp750")
+custom_feature_plot(dge_atlas_mTEC, "Grhl3")
+custom_feature_plot(dge_atlas_mTEC, "Notch3")
+
+get_similar_genes(dge_atlas_mTEC, "Sparc", 200) %>%
+  intersect(get_mouse_tfs())
+custom_feature_plot(dge_atlas_mTEC, "Sox2")
+custom_feature_plot(dge_atlas_mTEC, "Sox11")
+custom_feature_plot(dge_atlas_mTEC, "Sox12")
+custom_feature_plot(dge_atlas_mTEC, "Gata3")
+custom_feature_plot(dge_atlas_mTEC, "Tbx1")
+custom_feature_plot(dge_atlas_mTEC, "Nr2f2")
+custom_feature_plot(dge_atlas_mTEC, "Prrx1")
+custom_feature_plot(dge_atlas_mTEC, "Prrx2")
+
+save_feature_plots( dge_atlas_mTEC, results_path_mTEC, 
+                    gene_list = c( "Sox11", "Sox2", "Sox12", "Gata3", "Tbx1", "Nr2f2", "Prrx1", "Prrx2",
+                                   "Zfp750", "Grhl1", "Grhl3", "Notch3",
+                                   "Zfp36", "Zfp36l1", "Trp63", 
+                                   "Aire", "Fezf2", "Utf1", "Cdx1", "Tcf7" ),
+                    gene_list_name = "selected_TFs_mTEC" , types = "PDF_no_leg")
+
+
+save_feature_plots( dge_atlas_TECs, results_path_mTEC, 
+                    gene_list = c( "Sox11", "Sox2", "Sox12", "Gata3", "Tbx1", "Nr2f2", "Prrx1", "Prrx2",
+                                   "Zfp750", "Grhl1", "Grhl3", "Notch3",
+                                   "Zfp36", "Zfp36l1", "Trp63", 
+                                   "Aire", "Fezf2", "Utf1", "Cdx1", "Tcf7" ),
+                    gene_list_name = "selected_TFs" , types = "PDF_no_leg")
+
+```
+
+#### Save labels for downstream use
+
+```{r}
+saveto = file.path( results_path, "TECS_12_P0_bag_labeled.dge" )
+saveRDS(dge_atlas_TECs, saveto)
+inventory_add( tag = "TECS_12_P0_bag_labeled", filename = saveto, force = T ) 
+# dge_atlas_TECs = inventory_get( tag = "TECS_12_P0_bag_labeled") %>% readRDS
+```
+
+#### Appendix: assessing confidence for number of clusters
+
+```{r}
+conf_curve = ClusterBagStability( dge_atlas_TECs, k_max = 15, num_pc = 30 )
+conf_curve_bak = conf_curve
+{
+  pdf( file.path( results_path, "clustering_confidence_curve.pdf" ), width = 6, height = 3 )
+  plot( main = "Bootstrap variability of clusters", 
+        x = conf_curve$k, y = 1 - conf_curve$stability, 
+        ylab = "Instability", xlab = "Num clusters", type = "l", ylim = c(0, 0.4) )
+  dev.off()
+}
+```
+
+#### Featureplots for supplement
+
+```{r}
+ 
+save_plot_grid( dge = dge_atlas_TECs, results_path, 
+                gene_list = c( "Six1", "Epcam", "Cldn3","Cldn4",
+                               "Krt5", "Krt17", "Krt14", "Fezf2",
+                               "Tbata", "Ctsl", "Prss16", "Ackr4" ),
+                gene_list_name = "tec_supp",
+                ncol = 4, 
+                leg_pos = c( 0.75, 0.9 ),
+                cols.use = c("khaki1", "red"),
+                width = 20, height = 15 )
+
+save_plot_grid( dge = tec23_zoom, 
+                results_path, 
+                gene_list = c( "Tnfrsf11b", "Aire", "Tnfrsf11a",  "Traf6", "Relb", "Ubd", 
+                               "Pdpn", "Krt8", "Krt5", "Psmb11", "Ly75", "Cd40" ),
+                gene_list_name = "tec_supp",
+                ncol = 6, 
+                leg_pos = c( 0.7, 0.9 ),
+                cols.use = c("khaki1", "red"),
+                width = 12, height = 8 )
+
+save_plot_grid( dge = dge_atlas_TECs, results_path, 
+                gene_list = c("Dlk1","Dsg3", "Spink8", "Krt10" ),
+                gene_list_name = "tec_supp",
+                ncol = 2, 
+                leg_pos = c( 0.7, 0.9 ),
+                cols.use = c("khaki1", "red"),
+                width = 8, height = 8 )
+
+
+save_plot_grid( dge = dge_atlas_TECs, results_path, 
+                gene_list = c("Prss16", "Psmb11", "Cd83", "Ly75"),
+                gene_list_name = "tec_supp",
+                ncol = 2, 
+                leg_pos = c( 0.7, 0.9 ),
+                cols.use = c("khaki1", "red"),
+                width = 8, height = 8 )
+
+save_plot_grid( dge = dge_atlas_TECs, results_path, 
+                gene_list = c( "Il7", "Cxcl12", 
+                              "Ly75", "Cd83", "Enpep","Ackr4"),
+                gene_list_name = "tec_supp",
+                ncol = 3, 
+                leg_pos = c( 0.7, 0.9 ),
+                cols.use = c("khaki1", "red"),
+                width = 12, height = 8 )
+
+save_plot_grid( dge = dge_atlas_TECs, results_path, 
+                gene_list = c("plain" ),
+                gene_list_name = "tec_supp",
+                ncol = 1, 
+                leg_pos = c( 0.7, 0.9 ),
+                cols.use = "khaki1",
+                width = 4, height = 4 )
+```
+

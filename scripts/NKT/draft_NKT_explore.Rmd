@@ -1,0 +1,221 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+#### Assemble data
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+# Retrieve data; subset NKT cells
+dge_atlas_NKT = inventory_get(tag = "overview_clean_labeled") %>% readRDS
+save_feature_plots( dge_atlas_NKT, results_path, 
+                    gene_list = "ident", gene_list_name = "NCL_isolation_cartoon", 
+                    cols.use = stats::setNames(object = c(rep("grey", 4), 
+                                                          "grey30",
+                                                          rep("grey", 7)), 
+                                               nm = names(fig1_cols)), 
+                    types = "PDF_PNG_split" )
+
+dge_atlas_NKT %<>% SubsetDataFlex( vars.use = "ident", predicate = "ident=='BLD5'") 
+gc()
+
+# Add metadata and specially-aligned TCR counts. 
+dge_atlas_NKT %<>% add_tcr
+dge_atlas_NKT %<>% add_maehrlab_metadata("eday")
+dge_atlas_NKT %<>% add_maehrlab_metadata("genotype")
+dge_atlas_NKT@data.info$genotype[dge_atlas_NKT@data.info$genotype=="Pax9-Venus"] = "wt"
+```
+
+#### Redo exploration to get more resolution
+
+```{r}
+all_params = expand.grid( cc_method = c( "average" ),
+                          excess_var_cutoff = c( 0.5 ),
+                          log_expr_cutoff = c( 0.1 ), 
+                          prop_genes_to_select = NA, 
+                          num_genes_to_select = NA, 
+                          var_gene_method = "seurat",
+                          num_pc =  c(12), 
+                          clust_method = "SNN",
+                          clust_granularities_as_string = "0.5",
+                          plot_all_var_genes = F,
+                          stringsAsFactors = F)
+dge_atlas_NKT %<>% explore_embeddings(results_path=results_path, all_params = all_params )
+```
+
+#### Cluster, choosing number of clusters via bootstrap stability
+
+```{r}
+
+{
+  pdf(file.path(results_path, "elbow_plots.pdf"))
+  PCElbowPlot(dge_atlas_NKT, num.pc = 30) %>% print
+  PCElbowPlot(dge_atlas_NKT, num.pc = 300)  %>% print
+  dev.off()
+}
+NUM_PC = 30 
+
+stability_df = ClusterBagStability(dge_atlas_NKT, num_pc = NUM_PC )
+{
+  pdf(file.path(results_path, "cl_bag_stability_initial.pdf"), width = 7, height= 3.5)
+  plot(stability_df$k, 1 - stability_df$stability,
+       xlab = "Number of clusters", ylab = "Labeling instability",
+       type = "l",
+       main = "Cluster count versus model instability")
+  dev.off()
+}
+NUM_CLUSTERS = 9
+dge_atlas_NKT %<>% ClusterBag(k = NUM_CLUSTERS, num_pc = NUM_PC )
+save_feature_plots(dge_atlas_NKT, results_path, 
+                   gene_list = paste0( "cl_bag_", c("assignment", "confidence", 1:NUM_CLUSTERS)), 
+                   gene_list_name = "cl_bag_output_initial" )
+```
+
+Oops, found doublets. Remove them and re-run pipeline on clean data.
+
+```{r}
+dge_atlas_NKT@data.info$predicted_dubs = (dge_atlas_NKT@data.info$cl_bag_5 >= 0.2) %>% as.character
+save_feature_plots(dge_atlas_NKT, results_path, 
+                   gene_list = c(  "cl_bag_5", "Ccl25", "Psmb11", "Krt17", "Krt8" ), 
+                   gene_list_name = "TEC_markers_before_removal" )
+save_feature_plots(dge_atlas_NKT, results_path, 
+                   gene_list = c( "predicted_dubs"), 
+                   gene_list_name = "TEC_markers_before_removal", cols.use = c("FALSE" = "blue", "TRUE" = "red") )
+dge_atlas_NKT %<>% SubsetDataFlex("cl_bag_5", "cl_bag_5 < 0.2")
+```
+
+Running the pipeline again: 
+
+```{r}
+dge_atlas_NKT %<>% explore_embeddings(results_path=results_path, all_params = all_params )
+
+{
+  pdf(file.path(results_path, "elbow_plots_final.pdf"))
+  PCElbowPlot(dge_atlas_NKT, num.pc = 30) %>% print
+  PCElbowPlot(dge_atlas_NKT, num.pc = 300)  %>% print
+  dev.off()
+}
+NUM_PC = 30 
+stability_df = ClusterBagStability(dge_atlas_NKT, num_pc = NUM_PC )
+{
+  pdf(file.path(results_path, "cl_bag_stability_final.pdf"), width = 7, height= 3.5)
+  plot(stability_df$k, 1 - stability_df$stability,
+       xlab = "Number of clusters", ylab = "Labeling instability",
+       type = "l",
+       main = "Cluster count versus model instability")
+  dev.off()
+}
+NUM_CLUSTERS = 10
+dge_atlas_NKT %<>% ClusterBag(k = NUM_CLUSTERS, num_pc = NUM_PC )
+save_feature_plots(dge_atlas_NKT, results_path, 
+                   gene_list = paste0( "cl_bag_", c("assignment", "confidence", 1:NUM_CLUSTERS)), 
+                   gene_list_name = "cl_bag_output_final" )
+NUM_CLUSTERS = dge_atlas_NKT@data.info$cl_bag_assignment %>% as.character %>% table %>% length
+```
+
+####Rename clusters
+
+```{r}
+dge_atlas_NKT %<>% SetIdent(ident.use = dge_atlas_NKT@data.info$cl_bag_assignment)
+dge_atlas_NKT %<>% BuildClusterTree()
+converter = setNames( paste0("NCL", 1:NUM_CLUSTERS), 
+                      extract_tip_order(dge_atlas_NKT@cluster.tree[[1]]) )
+
+new_labels =  converter[dge_atlas_NKT@data.info$cl_bag_assignment]
+dge_atlas_NKT %<>% SetIdent(ident.use = new_labels)
+dge_atlas_NKT %<>% BuildClusterTree()
+
+```
+
+#### Save final object with renamed clusters
+
+```{r}
+
+save_path = file.path(  results_path, "dge_labeled.data")
+saveRDS(dge_atlas_NKT, save_path)
+inventory_add( filename = save_path, 
+               tag = "NKT_atlas_with_tcr_cl_bag", 
+               force = T,
+               extra = "Seurat object with NKT cells from atlas (all ages). Includes TCR realignment results." )
+# dge_atlas_NKT = inventory_get("NKT_atlas_with_tcr_cl_bag") %>% readRDS
+
+```
+
+#### Visualize model output
+
+```{r}
+
+{
+  pdf(file.path(results_path, "dendrogram.pdf"), height = 3.5, width = 7 )
+  PlotClusterTree(dge_atlas_NKT)
+  dev.off()
+}
+
+{
+  p = annot_ident_plot(dge_atlas_NKT, results_path, "ident_label_overlaid")
+  p = p + theme(legend.position = "none")
+  ggsave(file.path(results_path, "ident_label_overlaid.pdf"), p, height = 5, width = 5)
+  p = custom_feature_plot(dge_atlas_NKT, "eday", cols.use = extended_eday_colors ) 
+  p = p + scale_color_gradientn( colours = extended_eday_colors, breaks = 12.5:19.5 )
+  ggsave(file.path(results_path, "eday_with_legend.pdf"), p, height = 5, width = 5)
+  p = p + theme(legend.position = "none")
+  ggsave(file.path(results_path, "eday_properly_sized.pdf"), p, height = 5, width = 5)
+}
+
+ncl_pie = SeuratPie( dge_atlas_NKT, ident.use = "ident", facet_by = "eday" ) + facet_wrap("eday", nrow = 2)
+ggsave( file.path(results_path, "ident_by_eday.pdf"), ncl_pie )
+```
+
+
+#### Save featureplots
+
+```{r}
+
+save_feature_plots( dge_atlas_NKT, results_path = file.path(results_path, "NKT"),
+                    types = c("pdf", "pdf_no_leg"), gene_list_name = "summary",
+                    gene_list = "eday", cols.use = extended_eday_colors, height = 3.5, width = 4 )
+
+save_feature_plots( dge_atlas_NKT, results_path = file.path(results_path, "NKT"),
+                    types = c("pdf", "pdf_no_leg"), gene_list_name = "summary",
+                    gene_list = "ident", height = 3.5, width = 4 )
+
+tsne_colored(dge_atlas_NKT, results_path, fig_name = "cartoon",  height = 3.5, width = 4)
+
+```
+
+#### Quickly preview cluster markers
+
+```{r}
+cell_types = levels(dge_atlas_NKT@ident)
+de_gene_tables = as.list(cell_types)
+names(de_gene_tables) = cell_types
+for( ct in cell_types ){
+  de_gene_tables[[ct]] = FindMarkersFlex(dge_atlas_NKT, "ident", ident.1 = ct, thresh.use = 1)
+}
+
+genes_dd_heatmap = de_gene_tables %>%
+  lapply(dplyr::top_n, n = 10, wt = avg_diff ) %>%
+  lapply( extract2, "gene") %>% Reduce(f=union)
+genes_aggregated = make_heatmap_for_table( dge_atlas_NKT,
+                                           ident.use = "ident",
+                                           desired_cluster_order = cell_types,
+                                           genes_in_order = genes_dd_heatmap, 
+                                           return_type = "table" )
+genes_dd_heatmap = OrderRowsForHeatmap(genes_aggregated)
+# genes_dd_heatmap = genes_dd_heatmap[hclust(dist(genes_aggregated))$order]
+
+p =  make_heatmap_for_table( dge_atlas_NKT, 
+                             ident.use = "ident",
+                             desired_cluster_order = cell_types,
+                             genes_in_order = genes_dd_heatmap,
+                             labels = "all") + 
+  scale_fill_gradientn( colors = blue_gray_red )
+ggsave(file.path(results_path, "NCL_heatmap_datadriven_PREVIEW.pdf"), p, height = 10)
+```
+
+
+

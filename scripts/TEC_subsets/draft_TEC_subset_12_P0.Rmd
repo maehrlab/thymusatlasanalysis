@@ -1,0 +1,58 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+# # Retrieve overview TECs 
+dge = inventory_get( tag = "overview_clean_labeled" ) %>% readRDS 
+save_feature_plots( dge, results_path, 
+                    gene_list = "ident", gene_list_name = "TEC_isolation_cartoon", 
+                    cols.use = stats::setNames(object = c(rep("grey", 9), 
+                                                          rep("grey30", 3)), 
+                                               nm = names(fig1_cols)), 
+                    types = "PDF_PNG_split" )
+
+
+
+tsne_colored( dge %>% SetIdent(ident.use = dge@data.info$simple_ident), 
+              results_path, colour = "simple_ident", 
+              fig_name = "TECs_subsetted", subset_id = "TEC" )
+dge %<>% SubsetDataFlex( "ident", "substr(ident, 1, 3) == 'TEC'" ) 
+tsne_colored( dge, 
+              results_path, colour = "ident", 
+              fig_name = "TECs_subsetted_check" )
+assertthat::assert_that( length(dge@cell.names) > 3000 )
+
+write.table(FetchData(dge, "eday") %>% table %>% as.data.frame, 
+            file.path(results_path, "cells_by_day.txt"), 
+            quote = F, row.names = F, col.names = T)
+
+# # Fill in tSNE and PCA et cetera
+all_params = expand.grid( cc_method = c( "average" ),
+                          excess_var_cutoff = c( 0.5,0.8 ),
+                          log_expr_cutoff = c( 0.1 ), 
+                          prop_genes_to_select = NA, 
+                          num_genes_to_select = NA, 
+                          var_gene_method = "seurat",
+                          num_pc = c( 12, 20, 25 ),
+                          clust_method = "SNN",
+                          clust_granularities_as_string = "0.5",
+                          plot_all_var_genes = F,
+                          stringsAsFactors = F)
+dge = explore_embeddings( dge, results_path = results_path, all_params)
+
+
+params = collapse_by_name(all_params[1, ])
+freezr::inventory_add( inv_location = today_dest, 
+                       tag = "TECS_12_p0_explore", force = T,
+                       parent_tag = "overview_clean_labeled", 
+                       filename = file.path( results_path, params, "dge.data" ), 
+                       extra = "Exploration of Fig 1 TECs. 12 to P0, no sorted data.")
+
+save_feature_plots(dge, results_path, gene_list = "Ptprc", gene_list_name = "Ptprc")
+```

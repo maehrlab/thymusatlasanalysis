@@ -1,0 +1,152 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+## Reconsider classification of TECs
+
+Goals for this script:
+
+- Thoroughly describe the heterogeneity present within the TECs, accounting for uncertainty.
+- Generate output describing:
+    - Cluster labels to be used going forwards
+    - Exploration of clustering possibilities (e.g. different numbers of clusters; dendrogram)
+    - A large heatmap
+    - Pie charts of cluster sizes over time
+    - Marker genes and featureplots of marker genes
+
+#### Retrieve TECs; remove doublets
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+dge_atlas_TECs = inventory_get( tag = "TECS_12_p0_explore" ) %>% readRDS
+
+save_feature_plots(dge_atlas_TECs, results_path, gene_list = c("Ptprc", "ident"), gene_list_name = "before_dub_removal")
+dge_atlas_TECs %<>% SubsetDataFlex( "ident", "ident != 6" )
+save_feature_plots(dge_atlas_TECs, results_path, gene_list = c("Ptprc", "ident"), gene_list_name = "after_dub_removal")
+
+```
+
+#### Redo exploration without doublets
+
+```{r}
+all_params = expand.grid( cc_method = c( "average" ),
+                          excess_var_cutoff = c( 0.5 ),
+                          log_expr_cutoff = c( 0.1 ), 
+                          prop_genes_to_select = NA, 
+                          num_genes_to_select = NA, 
+                          var_gene_method = "seurat",
+                          num_pc =  12, 
+                          clust_method = "SNN",
+                          clust_granularities_as_string = "0.5",
+                          plot_all_var_genes = F,
+                          stringsAsFactors = F)
+dge_atlas_TECs %<>% explore_embeddings( results_path = results_path, all_params)
+```
+
+#### Fit cluster model with bagging
+
+```{r}
+
+dge_atlas_TECs %<>% add_maehrlab_metadata("eday")
+
+NUM_CLUSTERS = 7
+dge_atlas_TECs %<>% ClusterBag( k=NUM_CLUSTERS, num_pc = 25 )
+
+# Rename clusters to be consecutive on dendrogram
+{
+  dge_atlas_TECs %<>% SetIdent( ident.use = dge_atlas_TECs@data.info$cl_bag_assignment )
+  dge_atlas_TECs %<>% BuildClusterTree
+  auto_names = extract_tip_order(dge_atlas_TECs@cluster.tree[[1]])
+  phylo_names = paste0("TEC", 1:NUM_CLUSTERS)
+  custom_names = c(paste0("mTEC", 1:3), 
+                   paste0("cTEC", 4:1))
+  old_converter = setNames(phylo_names, auto_names)
+  new_converter = setNames(custom_names, auto_names)
+  dge_atlas_TECs@data.info$old_cell_type  = old_converter[dge_atlas_TECs@data.info$cl_bag_assignment]
+  dge_atlas_TECs@data.info$cell_type      = new_converter[dge_atlas_TECs@data.info$cl_bag_assignment]
+  dge_atlas_TECs %<>% SetIdent( ident.use = new_converter[dge_atlas_TECs@data.info$cl_bag_assignment] )
+}
+
+dge_atlas_TECs %<>% BuildClusterTree
+{
+  pdf(file.path(results_path, "cluster_tree.pdf"), width = 6, height = 4)
+  PlotClusterTree(dge_atlas_TECs)
+  dev.off()
+}
+```
+
+#### Summary data and cluster modeling output
+
+```{r}
+
+TEC_markers = c( "Pax1", "Pax9",
+                 "Ccl25", "Ackr4", "Prss16", "Psmb11",  
+                 "Ly75", "Enpep","Krt8", "Krt17", "Krt14",
+                 "Cd74", "H2-Aa", "Aire", "Fezf2", "Tnfrsf11a", "Krt5",
+                 "Cldn3", "Cldn4", "Six1", "Six4", "Eya1")
+
+save_feature_plots(dge_atlas_TECs, results_path = results_path, types = c("PDF", "pdf_no_leg", "PDF_PNG_split"),
+                   gene_list = TEC_markers, gene_list_name = "genes")
+save_feature_plots(dge_atlas_TECs, results_path = results_path, types = c("PDF", "pdf_no_leg", "PDF_PNG_split"),
+                   gene_list = "eday", cols.use = extended_eday_colors,                   
+                   gene_list_name = "metadata") 
+save_feature_plots(dge_atlas_TECs, results_path = results_path, types = c("PDF", "pdf_no_leg", "PDF_PNG_split"),
+                   gene_list = "cell_type", cols.use = TEC_cols,                   
+                   gene_list_name = "metadata") 
+p = annot_ident_plot(dge_atlas_TECs, results_path, figname = "ident_labeled_badcol" ) + 
+          scale_color_manual(values = TEC_cols)
+ggsave( file.path( results_path, "ident_labeled.pdf" ), p )
+
+save_feature_plots(dge_atlas_TECs, results_path = results_path, types = c("PDF", "pdf_no_leg", "PDF_PNG_split"),
+                   gene_list =  paste0( "cl_bag_", c( "assignment", "confidence", 1:NUM_CLUSTERS ) ), 
+                   gene_list_name = "metadata") 
+# Check for batch/ribo effects
+dge_atlas_TECs %<>% add_rp_percentage
+save_feature_plots(dge_atlas_TECs, results_path = results_path, types = c("PDF", "pdf_no_leg"),
+                   gene_list = c( "ribo_nUMI_pct", "orig.ident" ), 
+                   gene_list_name = "metadata") 
+```
+
+#### Save labels for downstream use
+
+```{r}
+saveto = file.path( results_path, "TECS_12_P0_bag_labeled.dge" )
+saveRDS(dge_atlas_TECs, saveto)
+inventory_add( tag = "TECS_12_P0_bag_labeled", filename = saveto, force = T ) 
+# dge_atlas_TECs = inventory_get( tag = "TECS_12_P0_bag_labeled") %>% readRDS
+```
+
+#### Appendix 1: assessing confidence for number of clusters
+
+```{r}
+conf_curve = ClusterBagStability( dge_atlas_TECs, num_pc = 25 )
+conf_curve_bak = conf_curve
+{
+  pdf( file.path( results_path, "clustering_confidence_curve.pdf" ), width = 6, height = 3 )
+  plot( main = "Bootstrap variability of clusters", 
+        x = conf_curve$k, y = 1 - conf_curve$stability, 
+        ylab = "Instability", xlab = "Num clusters", type = "l", ylim = c(0, 0.4) )
+  dev.off()
+}
+```
+
+#### Featureplots for supplement
+
+```{r}
+ 
+save_plot_grid( dge = dge_atlas_TECs, results_path, 
+                gene_list = c( "Aire", "Krt5", "Cldn4", "H2.Aa",
+                               "Ly75", "Psmb11", "Prss16" ),
+                gene_list_name = "tec_supp",
+                ncol = 4, 
+                size = 0.5,
+                leg_pos = c( 0.7, 0.95 ),
+                cols.use = c("khaki1", "red"),
+                width = 15, height = 7.5 )
+
+```
+

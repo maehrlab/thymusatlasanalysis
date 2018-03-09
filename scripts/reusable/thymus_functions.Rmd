@@ -1,0 +1,1782 @@
+
+---
+title: "Cleaning the DGE Data"
+author: "Eric Kernfeld"
+date: "September 7, 2016"
+output: html_document
+---
+
+###Setup 
+
+This chunk sets up the file system and some functions to retrieve reference tables. It also loads in some useful packages and sets up a few hand-picked color schemes. 
+
+You may need to edit the first few lines depending on where your data reside(s).
+
+```{r}
+
+PATH_TO_DATA = file.path( "~", "Dropbox", "2016JULY07scRNAseq", "data" )
+PATH_TO_METADATA = file.path( PATH_TO_DATA, "DROPseq_stats_working.csv")
+if( path.expand("~") == "/Users/erickernfeld" ){
+  # For me
+  PATH_TO_TABLES = file.path( "~","Desktop","scRNA_redo_12_p0", "tables" ) 
+} else {
+  # For my team
+  PATH_TO_TABLES = file.path( "~","Dropbox","2016JULY07scRNAseq","tables" ) 
+}
+
+
+# Generally indispensible
+library(ggplot2)
+library(magrittr)
+
+assertthat::assert_that( packageVersion("destiny") >= "2")
+if( packageVersion("ggplot2") < "2.2.1.9000" ) { 
+  warning("You may need the development version of ggplot2 if you want the 
+          `overplot_adjust=T` option in `custom_feature_plot` to work.")
+}
+
+showcol = function(col) { pie(rep(1, length(col)), col = col) }
+CC_PHASES = c("IG1.S", "S", "G2.M", "M", "M.G1")
+black_white = c( colorspace::sequential_hcl( 30, h = 0,   c. = c(0, 0),     l = c( 0, 100  ) ) )
+blue_gray_red  = colorspace::diverge_hcl   ( 30,          c = 180,          l = c( 40, 80  ) )
+gray_red = colorRampPalette(c("gray85","gray60", "red"))(8)
+blue_purple_red = colorRampPalette(c("blue", "red"))(30) 
+red_yellow  = c( colorspace::sequential_hcl( 15, h = 0,   c. = c(150, 0),   l = c( 40, 30  ) ),
+                 colorspace::sequential_hcl( 15, h = 40,  c. = c(0, 80),    l = c( 30, 80  ) ) )
+yellow_red  = c( colorspace::sequential_hcl( 18, h = 60,  c. = c(100, 100), l = c( 100, 80 ) ),
+                 colorspace::sequential_hcl( 12, h = 0,   c. = c(100, 160), l = c( 80, 40  ) ) )
+blue_yellow = c( colorspace::sequential_hcl( 15, h = 260, c. = c(50, 0),    l = c( 13, 65 ) ), 
+                 colorspace::sequential_hcl( 15, h = 40,  c. = c(0, 80),    l = c( 65, 95 ) ) )
+human_mouse_vvv_colors = c( "goldenrod4", "lightgoldenrod2", "goldenrod3", "goldenrod1", 
+                            "cadetblue4", "blue4", "cadetblue3", "blue1", "cadetblue1", 
+                            "firebrick4","deeppink3", "firebrick3","palevioletred1", "firebrick1")
+Thanksgiving_colors = c("yellow", "orange", "red", "brown")
+  
+extended_eday_colors = c( colorRampPalette( c("yellow", "orange", "red", "brown", "black") )(8) )
+names(extended_eday_colors) = as.character(12:19 + 0.5)
+extended_eday_colors = c(extended_eday_colors, "P0" = "black", use.names = T)
+extended_eday_ftoc_colors = c(extended_eday_colors, "blue")
+names(extended_eday_ftoc_colors) = c(paste0(names(extended_eday_colors), ".embryo"), "16.5.FTOC")
+  
+imitate_cubehelix = c("#fff6e3",
+                      "#ddcac4",
+                      "#bca0a6",
+                      "#9b7789",
+                      "#7b506d",
+                      "#5b2a52",
+                      "#3c0038")
+
+# Color scheme mapped from old overview cluster names 
+fig1_cols_old = c( "deeppink", "pink", "red", "purple", "saddlebrown", "deeppink4", 
+                   "orange", "goldenrod",  "blue" ,
+                   "cadetblue1", "cadetblue", "cadetblue3" )
+names(fig1_cols_old) = c(  "BLD1", "BLD2", "BLD3", "BLD4", "BLD5", "BLD6",
+                           "END",  "MES",  "PTH",
+                           "TEC1", "TEC2", "TEC3")
+fig1_cluster_conversions =
+  freezr::inventory_get( tag = "overview_old_labels" ) %>% 
+  read.table(header = T, stringsAsFactors = F)
+fig1_cols = 
+  c(fig1_cluster_conversions$color, 
+    fig1_cluster_conversions$color)
+names( fig1_cols ) =
+  c(fig1_cluster_conversions$old_ident, 
+    fig1_cluster_conversions$ident)
+
+fig1_cols_simple = fig1_cols_old
+fig1_cols_simple[1:6] = "red"
+fig1_cols_simple[10:12] = "cadetblue1"
+RA_FTOC_colors = c( "BMS" = "orange1", "CTRL" = "grey", "RA" = "brown4")
+NKT_SUBSET_COLS    = c( "NKT_1" = "cadetblue", "NKT_2" = "orange", "NKT_17" = "red", "NKT_early" = "yellow")
+NKT_SUBSET_COLS %<>% c( "ILC_a" = "cadetblue", "ILC_b" = "orange", "ILC_c" = "red", "ILC_early" = "yellow")
+NKT_LTI_COLS    = c( "NKT_1" = "cadetblue", "NKT_2" = "orange", "NKT_17" = "red", "LTi" = "brown")
+NKT_LTI_COLS %<>% c( "ILC_a" = "cadetblue", "ILC_b" = "orange", "ILC_c" = "red", "ILC_d" = "brown")
+EDAY_GENOTYPE_COLORS = c(colorRampPalette(Thanksgiving_colors)(5), "blue")
+names(EDAY_GENOTYPE_COLORS) = c(paste0(12:16+0.5, ".wt"), "16.5.Rag1null")
+RAG_WT_COLORS = c("wt" = "purple", "Rag1null" = "goldenrod1")
+NCL_COLORS = scales::hue_pal()(8)
+names(NCL_COLORS) = paste0("NCL", 1:8)
+
+TEC_cols = c("TEC1" = "pink",
+             "TEC2" = "firebrick1",
+             "TEC3" = "firebrick3",
+             "TEC4" = "goldenrod3",
+             "TEC5" = "goldenrod4",
+             "TEC6" = "gold3",
+             "TEC7" = "goldenrod1",
+             "TEC8" = "gold1",
+             "TEC9" = "cadetblue", 
+             
+             "mTEC1" = "pink",
+             "mTEC2" = "firebrick1",
+             "mTEC3" = "firebrick3",
+             "cTEC4" = "goldenrod3",
+             "cTEC3" = "goldenrod4",
+             "cTEC2" = "gold3",
+             "cTEC1" = "goldenrod1" )
+
+aggregate.nice = thymusatlastools::aggregate_nice
+```
+
+###Utilities
+
+```{r}
+make_name_preserving = function( FUN, ... ){
+  FUN_name_pres = function(x){
+    nm = names(x)
+    dnm = dimnames(x)
+    x = FUN(x, ...)
+    names(x) = nm
+    dimnames(x) = dnm
+    return(x)
+  }
+  return(FUN_name_pres)
+}
+
+
+add_factor_interaction = function( dge, 
+                                   factor.1, factor.2, 
+                                   factor.1.levels = NULL, factor.2.levels = NULL ){
+  if(!(factor.1 %in% AvailableData(dge))){
+    try( dge %<>% add_maehrlab_metadata(factor.1) )
+  }
+  if(!(factor.2 %in% AvailableData(dge))){
+    try( dge %<>% add_maehrlab_metadata(factor.2) )
+  }
+  if(!is.null( factor.1.levels )){
+      dge@data.info[[factor.1]] %<>% factor( levels = factor.1.levels, ordered = T)
+  }
+  if(!is.null( factor.2.levels )){
+    dge@data.info[[factor.2]] %<>% factor( levels = factor.2.levels, ordered = T)
+  }
+  dge@data.info[paste0(factor.1, "X", factor.2)] = interaction(FetchData(dge, c(factor.1, factor.2)), drop = T)
+  return( dge )
+}
+
+add_edayXother = function( dge, other, other_levels ){
+  return( add_factor_interaction( dge, factor.1 = "eday", factor.2 = other, factor.2.levels = other_levels ) )
+}
+
+get_depict_genes = function(){
+  orig_expr_mat = "~/Desktop/depict_with_atlas/depict/data/original tissue expression/GPL570EnsemblGeneExpressionPerTissue_DEPICT20130820_z.txt"
+  x = read.table( orig_expr_mat, 
+                  row.names = 1, header = T, stringsAsFactors = F, sep = "\t" ) %>% rownames
+  return(x)
+}
+
+get_nkt_genes = function(){
+  return(c( "Ptcra",
+            "Ifng",
+            "Tox",
+            "Id2", 
+            "Rora",
+            "Plac8",
+            "Tmem176a",
+            "Tnfrsf25",
+            "Il23r",
+            "Cd4",
+            "Gata3",
+            "Il2rb",
+            "TRA_TOTAL",
+            "TRB_TOTAL",
+            "TRG_TOTAL",
+            "TRD_TOTAL",
+            "Zbtb7a",
+            "Eomes",
+            "Rorc",
+            "Il17a",
+            "Il17f",
+            "Il4",
+            "Lef1",
+            "Tbx21",
+            "Myb",
+            "Lmo4",
+            "Zbtb16",
+            "Klrb1c",
+            "Cd27",
+            "Ccr6",
+            "Cd24a",
+            "Cd44",
+            "Cd8a",
+            "Klrk1",
+            "Klrc1",
+            "Cd69",
+            "Cd3e",
+            "Cd3g",
+            "Cd3d" ))
+}
+
+get_LTi_genes = function(){
+  return(c("Tnfsf11",
+           "Il23r",
+           "Ltb", 
+           "Gata3",
+           "Rorc",
+           "Il22", 
+           "Ccr7","Ccr6",
+           "Il17r","Il17f"))
+}
+
+get_TEC_genes = function(){
+  c( "Krt14",
+     "Hoxa3", "Pax1", "Pax9", "Eya1", "Six1", "Six4", "Tbx1", 
+     "Krt17", "Krt5", "Tnfrsf11a",
+     "Cldn3", "Cldn4",
+     "Prss16", "Psmb11", "Tbata", 
+     "Cd74", "H2-Aa", "H2-Eb1", "Ly75", "Enpep", "Ltbr",
+     "Aire", "Fezf2", "Il7", "Dll4", "Cxcl12", "Ccl25", 
+     "Cd80", "Cd40", "Cd83",  
+     "Ccl19", "Ackr4", "Kitl", "Plet1", "Epcam",
+     "Foxn1", "Bmp4", "Wnt4", "Wnt5b", "Dkk1", 
+     "Kremen1", "Fgfr2", "Shh", "Hey1", "Hey2", "Fgf21",
+      "Egfr", "Trp63", "Cbx4", "Pou2f3", "Ehf",  
+     "Relb","Rela",  "Traf6", "Ascl1", "Fezf2", "Spib", "Hdac3", "Bmi1", "Chuk", "Map3k14", 
+     "Ctsz", "Ctss", "Ctsh", "Skint1", "Xcl1", "Ctsl", "Atg5", "Sirt1")
+}
+
+get_RA_genes = function( small_list = T ){
+  by_hand = c( "Rara", "Rarb", "Rarc", 
+               "Cyp26b1", "Cyp26a", 
+               "Hoxa1", "Hoxa2", "Hoxa3", "Hoxa5", "Hoxa7", "Hoxa9", "Hoxaas2", 
+               "Hoxb2", "Hoxb3", "Hoxb4", "Hoxb5", "Hoxd3", "Hoxd4", "Hoxd8",
+               "Hoxd9", "Hoxa4", "Hoxaas3", "Hoxd1", "Hoxc4", "Hoxc5" )
+  if(small_list){return(by_hand)}
+  balmer_blomhoff = read.table(file.path(PATH_TO_TABLES, "ra_targets_filtered.txt"), header = T, stringsAsFactors = F)[[1]]
+  dedup = function(x) x[!duplicated(x)]
+  return(dedup(c(by_hand, balmer_blomhoff)))
+}
+
+```
+
+
+```{r}
+#' Inform selection of IF or FACS markers: is it specific?
+#'
+#' @param dge_target Seurat object with cells expressing the markers in question.
+#' @param dge_reference Seurat object of cells that could potentially interfere with FACS or microscopy.
+#' @param genes Candidate markers to be stained for.
+#' @param tol Max percent of cells in each reference cluster permitted to express the marker.
+#' @param ident.use Variable to partition dge_reference.
+#'
+#' @details In each cluster of the reference DGE, finds how highly expressed the target genes are relative to the target DGE. 
+#' The criterion is how many reference cells exceed half the target cluster mean. This allows dge_target to be 
+#' homogeneous. For example, suppose your target object contains thymic epithelium. 
+#' Even if 95% of the cells don't express Cd74, the half-mean will still be greater than zero,
+#' and there is a chance for Cd74 to be regarded as specific. The median does not share this useful property.
+#'
+#' This criterion is applied separately to each cluster of the reference_dge, so if the reference contains a tiny cluster of
+#' dendritic cells, 50% of whom express Cd74, this will cause Cd74 to be considered not specific. 
+#'
+#' @export
+#'
+IsSpecific = function(dge_target, dge_reference, genes, tol = 0.1, ident.use = "ident"){
+  half_means = FetchData(dge_target, genes) %>% colMeans %>% divide_by(2)
+  ident = FetchDataZeroPad(dge_reference, ident.use)[[1]]
+  reference_expr = FetchDataZeroPad(dge_reference, genes)
+  reference_expr_bin = sweep(reference_expr, MARGIN = 2, STATS = half_means, FUN = is_greater_than)
+  reference_props = aggregate_nice(reference_expr_bin, ident, mean) 
+  is_specific = reference_props %>% apply( 2, is_less_than, tol ) %>% apply(2, all)
+  names(is_specific) = genes
+  return( is_specific )
+}
+```
+
+### Non-reusable tools for figure-making
+
+##### Featureplots in grids
+
+```{r}
+# Many thanks to the R cookbook for this function
+# http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_(ggplot2)/ 
+#
+# Multiple plot function
+#
+# ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
+# - cols:   Number of columns in layout
+# - layout: A matrix specifying the layout. If present, 'cols' is ignored.
+#
+# If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
+# then plot 1 will go in the upper left, 2 will go in the upper right, and
+# 3 will go all the way across the bottom.
+#
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    nrow = cols, ncol = ceiling(numPlots/cols)) %>% t
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+
+
+
+fix_legend_default = function(p, title_pos, leg_pos, size = NULL) {
+  p = p + labs(colour = "")
+  p = p + scale_colour_gradientn(colors = c("khaki1","red"), 
+                                 breaks = c(0, p$plot_env$my_df[[3]] %>% max),
+                                 labels = c("0", "Max"))
+  p = p + theme(title = element_text(hjust = title_pos[[1]],
+                                     vjust = title_pos[[2]],
+                                     size = 18))
+  # p = p + theme(legend.position = c(                     leg_pos[[1]],           leg_pos[[2]]))
+  p = p + theme(legend.position = "none")
+  p = p + theme(legend.title = element_text(hjust = 0.95))
+  if(!is.null(size)){
+    p$layers[[2]] = NULL
+    p = p + geom_point(data = p$plot_env$my_df, 
+                       aes_string(x = "tSNE_1", 
+                                  y = "tSNE_2", 
+                                  colour=p$plot_env$my_df %>% names %>% extract(3)), 
+                       size = size)
+  }
+  return(p)
+}
+
+save_plot_grid = function( dge, results_path, 
+                           gene_list, gene_list_name, 
+                           ncol, width, height, 
+                           memory_saver = T, use_raw = F,
+                           leg_pos   = c(0.9, 0.9),
+                           title_pos = c(0.5, 0.9),
+                           size = NULL,
+                           fix_legend = fix_legend_default,
+                           edit_fun = (function(p) return(p)),
+                           ... ) {
+
+  if( memory_saver){
+    dge@scale.data = matrix()
+    if(use_raw){
+      dge@data = matrix()
+    } else {
+      dge@raw.data = matrix()
+    }
+    gc()
+  }
+  {
+    pdf(file.path(results_path, paste0(gene_list_name, ".pdf")), width = width, height = height )
+    multiplot( plotlist = 
+                 lapply(gene_list, custom_feature_plot, dge = dge, ...) %>%
+                 lapply(fix_legend, title_pos=title_pos, leg_pos=leg_pos, size=size) %>% 
+                 lapply(edit_fun), cols = ncol )
+    dev.off()
+  }
+}
+```
+
+##### TACS with Rag1 data
+
+```{r}
+
+rag1_TACS_plot = function(dge,
+                          g1, g2, 
+                          cutoffs = NULL,
+                          results_path = NULL, 
+                          name = NULL, 
+                          days_overlay = T,
+                          num_contours = NULL,
+                          ... ){
+  dge = TACS(dge, g1, g2, return_val = "seurat", ... )
+  scorenames = paste0(c(g1, g2), "_score")
+  X = dge %>% FetchData(c(scorenames, "eday", "genotype", "edayXgenotype"))
+  if(days_overlay){
+    e16   = subset(X, eday==16.5)
+    atlas = subset(X, genotype=="wt")
+    e16$facet = e16$genotype %>% as.character
+    e16$facet[e16$facet=="wt"] = "Atlas E16.5"
+    atlas$facet = "Atlas E12.5-E16.5"
+    plot_df = rbind( e16, atlas )
+    plot_df$facet %<>% factor(levels = c("Atlas E12.5-E16.5", "Atlas E16.5", "Rag1null"))
+  } else {
+    plot_df = X
+    plot_df$facet = plot_df$edayXgenotype
+  }
+  p = ggplot(plot_df, aes_string(x=scorenames[1], y = scorenames[2])) + facet_wrap("facet", nrow = 1) +
+    # stat_density2d( aes_string( fill = "..level.." ), geom = "polygon", bins = 50 ) +
+    stat_density2d( aes_string( colour = "edayXgenotype", alpha = "..level.." ), bins = 50 ) +
+    scale_fill_gradient2(low = "white", high = "black", trans = "log1p" ) +
+    scale_color_manual( values = EDAY_GENOTYPE_COLORS )
+    scale_alpha_continuous( range = c(0.4, 1) )
+
+  if(!is.null(cutoffs)){
+    p %<>% add_quadrants(g1_score_name = scorenames[1], g2_score_name = scorenames[2], cutoffs = cutoffs, facet_by = "facet")
+  }
+  
+  if(!is.null(results_path) && !is.null(name)){
+    ggsave(file.path(results_path, paste0(name, ".pdf")), plot = p, width = 6 + 6*(!days_overlay), height = 3)
+  }
+  return(p)
+}
+
+```
+
+##### Annotate a plot with cluster labels
+
+```{r}
+annot_ident_plot = function(dge, results_path, figname, ident.use = "ident" ){
+  centers = aggregate.nice( FetchData(dge, c("tSNE_1", "tSNE_2")), by=FetchData(dge, ident.use), mean ) %>% as.data.frame
+  centers$cluster = levels( FetchData(dge, ident.use)[[1]] )
+  p = custom_feature_plot( dge, colour = ident.use )
+  p = p + geom_label( data = centers, aes_string(x = "tSNE_1", y = "tSNE_2", label = "cluster", size = 8 ) )
+  ggsave(file.path(results_path, paste0(figname, ".pdf")), p, height = 7, width = 8)
+  return(p)
+}
+```
+
+##### Display fractional identity from quadratic programming.
+
+```{r}
+display_fractional_identity = function( dge_test, dge_train, main = "FTOC maturity", 
+                                        ident.use, genes.use = NULL, 
+                                        test.ident.use = NULL, test.col = NULL ){
+  if( is.null( genes.use ) ){
+    dge_train %<>% MeanVarPlot(x.low.cutoff = 0.1, y.cutoff = 0.5)
+    genes.use = dge_train@var.genes
+  }
+  
+  # Set up 
+  pseudo_bulk = dge_train %>% 
+    FetchDataZeroPad(genes.use) %>% 
+    aggregate_nice(by = FetchData(dge_train, ident.use )[[1]], FUN = mean) %>% t
+  colnames( pseudo_bulk ) %<>% make.names
+  test_cells = dge_test %>% FetchDataZeroPad(genes.use)
+  
+  # Obtain the fractional identities via quadratic programming
+  fractional_identities = apply( test_cells, 
+                                 MARGIN = 1, 
+                                 FUN = get_frac_ident,
+                                 pseudo_bulk = pseudo_bulk) %>% t %>% as.data.frame
+  fi_cols =  colnames( pseudo_bulk )
+  colnames( fractional_identities ) = fi_cols
+  fractional_identities[["ranking_var"]] = 
+    as.matrix( fractional_identities[fi_cols] ) %*% (1:length(fi_cols)) %>% 
+    rank( ties.method = "random" )
+  if( !is.null( test.ident.use ) ){
+    fractional_identities[["test_cell_labels"]] = dge_test %>% FetchDataZeroPad( test.ident.use ) %>% extract2(1)
+  }
+  
+  
+  eec = setNames( extended_eday_colors, names( extended_eday_colors ) %>% make.names )
+  p = ggplot(  fractional_identities[c("ranking_var", "test_cell_labels")] )  + 
+    ggtitle(main) + 
+    geom_density( aes( x = ranking_var, 
+                       colour = make.names(test_cell_labels), 
+                       y = ..scaled.. ) ) +
+    scale_fill_manual  (values = test.col ) +
+    scale_colour_manual(values = test.col ) +
+    xlab( "Cell rank" ) 
+  p = gg_add_colorbar( plot = p, 
+                       x         = fractional_identities[, "ranking_var",      drop = T],
+                       my_labels = fractional_identities[, "test_cell_labels", drop = T] %>% as.character, 
+                       col = test.col )
+  return( list( 
+    plot = p, 
+    overall_id_fractions =  fractional_identities[ fi_cols ]  %>% colMeans
+  ) )
+}
+```
+
+### Heatmapping tools
+
+##### Add colorbars to ggplots
+
+```{r}
+#' Add a colourbar to a ggplot object, fixing the fill to allow a separate colorscale. 
+#' 
+gg_add_colorbar = function( plot, 
+                            x, 
+                            my_labels,
+                            col = NULL,
+                            width_ = 0.1, 
+                            position = -0.1, 
+                            is_horiz = T ){
+  my_labels %<>% make.names
+  unique_labels = my_labels %>% unique
+  if( is.null( col ) ){
+    col = setNames( 
+      scales::hue_pal()( my_labels %>% unique %>% length ),
+      my_labels %>% unique %>% make.names 
+    )
+  } else {
+    if( !all( unique_labels %in% names( col ) ) ){
+      warning( "col should be named with some permutation of unique(make.names(my_labels)).\n" )
+    }
+  }
+  
+  colourbar_obs = data.frame( my_labels = my_labels, x = x, position = position - 0.1*replace_with_int_rank(my_labels) )
+  n = nrow(colourbar_obs)
+  for( cluster in unique_labels ){
+    if( is_horiz ){
+      plot = plot + 
+        geom_tile( data = subset( colourbar_obs, my_labels == cluster ),
+                   mapping = aes( x = x, y = position ), 
+                   height = width_,
+                   fill = col[cluster] ) 
+      # geom_density( data = subset( colourbar_obs, my_labels == cluster ),
+      #               mapping = aes( x = x, y = -n*0.2*..density.. ),
+      #               fill = col[cluster], alpha = 0.5 )
+    } else {
+      plot = plot +
+        geom_tile( data = subset( colourbar_obs, my_labels == cluster ),
+                   mapping = aes( y = x, x = position),
+                   width = width_,
+                   fill = col[cluster] ) 
+    }
+  }       
+  return(plot)
+}
+```
+
+##### For large heatmaps
+
+```{r}
+
+#' Return a cell ordering where predefined clusters remain contiguous.
+#' 
+OrderCellsWithinClusters = function( dge, ident.use, coords.use = paste0("PC", 1:30) ){
+  
+  # The implementation scheme here is to apply a series of permutations,
+  # first to order the cells by cluster and then to order the cells within each cluster.
+  # At the end, I can produce a single reordering equivalent to the composition of the
+  # steps described above. To do that, I'll keep track of the original position.
+  
+  # Set up df with ident and original position
+  clusters_and_orig_pos = Seurat::FetchData(dge, ident.use)
+  clusters_and_orig_pos[["orig_pos"]] = seq_along(clusters_and_orig_pos[[ident.use]])
+  
+  # Make clusters contiguous
+  clusters_and_orig_pos = clusters_and_orig_pos[order(clusters_and_orig_pos[[ident.use]]), ]
+  # Reorder each cluster
+  for( cluster in unique( clusters_and_orig_pos[[ident.use]] ) ){
+    this_cluster_idx_current = which( clusters_and_orig_pos[[ident.use]] == cluster )
+    this_cluster_idx_orig = clusters_and_orig_pos[this_cluster_idx_current, "orig_pos"]
+    this_cluster_coords = FetchData(dge, coords.use)[this_cluster_idx_orig, ]
+    this_cluster_reordering = this_cluster_coords %>% dist %>% (fastcluster::hclust) %>% extract2("order")
+    this_cluster_idx_new = this_cluster_idx_current[this_cluster_reordering]
+    clusters_and_orig_pos[this_cluster_idx_current, ] = clusters_and_orig_pos[this_cluster_idx_new, ] 
+  }
+  
+  # Return a reordering that works in one shot.
+  return( clusters_and_orig_pos[["orig_pos"]] )
+}
+
+#' Save a big PDF file to `<results_path>/<main>.pdf` containing a heatmap of gene expression levels.
+#' 
+#' @param dge a Seurat object
+#' @param results_path should be a character such that `dir.exists( results_path )`
+#' @param genes.use Genes to include in the heatmap. Character vector.
+#' @param main Figure title and name of saved file.
+#' @param ident.use Used to set up the ColSideColors in heatmap.2.
+#' @param cluster_colors List of colors named by levels of the FetdhData(dge, ident.use).  
+#' Used to set up the ColSideColors in heatmap.2. If you don't want any, put NULL.
+#' @param col a vector of color names for use in the main body of the heatmap.
+#' @details Each column is a cell and each row is a gene. Each gene is rescaled so that its peak expression is 1.
+#' This facilitates comparison within genes and across cells, though it's bad for comparison across genes.
+#'
+#'@export
+#'
+save_heatmap = function( dge, results_path, 
+                         genes.use = dge@var.genes, 
+                         preview_genes = get_rene_markers()[[2]],
+                         main = "heatmap_cellwise",
+                         ident.use = "ident",
+                         cluster_colors = NULL,
+                         col = blue_gray_red, 
+                         rsc = NULL ){
+  cat("Projecting PCA...\n")
+  dge %<>% ProjectPCA( do.print = F )
+  #save memory; these aren't used downstream
+  dge@raw.data = matrix()
+  dge@scale.data = matrix()
+  
+  # cat("Ordering genes...\n")
+  # genes.use = dge@pca.x.full[genes.use, ] %>% dist %>% (fastcluster::hclust) %>% extract2("order")
+  # genes.use = dge@var.genes[genes.use]
+  
+  # reorder cells and set sparse row labels
+  cat("Ordering cells...\n")
+  cell_order = OrderCellsWithinClusters( dge, ident.use = ident.use )
+  
+  # sweep out max expression level and set colorscale
+  cat("Normalizing expression...\n")
+  norm_expr = t( apply(X = dge@data[genes.use, cell_order], FUN = div_by_max, MARGIN = 1) )
+  
+  cat("Making preview... \n")
+  fname = paste0( main, "_PREVIEW.pdf" )
+  pdf( file.path( results_path, fname ) )
+  preview_genes = rownames(norm_expr) [rownames(norm_expr) %in% preview_genes] # like intersect(), but preserves order
+  preview_cells = sample( 1:ncol( norm_expr ), min( 300, ncol( norm_expr ) ) ) %>% sort
+  gplots::heatmap.2( norm_expr[preview_genes, preview_cells], 
+                     Rowv = F, 
+                     Colv = F, 
+                     dendrogram = "none",
+                     symm = F, 
+                     scale = "none", 
+                     col = col,
+                     trace = "none",
+                     xlab = "Cells", labCol = "",
+                     ylab = "Genes", labRow = "",
+                     ColSideColors = cluster_colors[ as.character(FetchData(dge, ident.use)[cell_order[preview_cells], 1]) ], 
+                     RowSideColors = rsc[preview_genes] )
+  dev.off()
+  
+  cat("Making full heatmap...\n")
+  fname = paste0( main, ".pdf" )
+  pdf( file.path( results_path, fname ) )
+  gplots::heatmap.2( norm_expr, 
+                     Rowv = F, 
+                     Colv = F, 
+                     dendrogram = "none",
+                     symm = F, 
+                     scale = "none", 
+                     col = col,
+                     trace = "none",
+                     xlab = "Cells", labCol = "",
+                     ylab = "Genes", labRow = "",
+                     ColSideColors = cluster_colors[ as.character(FetchData(dge, ident.use)[cell_order, 1]) ],
+                     RowSideColors = rsc )
+  dev.off()
+  cat("Done.\n")
+}
+```
+
+##### For small heatmaps
+
+```{r}
+
+#' Given a column ordering, produce a pleasing row ordering.
+#'
+#' @param X Set of data to order. Coerced to dataframe.
+#' @param wrap Logical. Treat column n as a neighbor of column 1?
+#' @param outlier_cutoff Numeric vector of length 1. See details.
+#' @param REORDERFUN_outlier Function accepting a df X and returning a vector of indices. 
+#' See details.
+#' @param ... Extra args passed to REORDERFUN_outlier. 
+#'
+#' @return Returns a permutation of rownames(X).
+#'
+#' This function attempts to order rows for a heatmap to match a given column ordering. 
+#' It attempts to create diagonal structure and it pays attention to which columns are adjacent.
+#' The algorithm first orders by where the max value occurs: if row Alice peaks in column 1 and 
+#' row Bob peaks in column 2, then Alice will precede Bob in the final ordering.
+#' If Bob and Cassandra both peak in column 2, then the tiebreaker is column 3 minus column 1.
+#' A version under development will attempts to detect cases such as David, who peaks in column 1 but also has
+#' large values in columns 4 and 5. These outliers will be placed separately at the end with an ordering 
+#' created by REORDERFUN_outlier.
+#'
+#' @export
+#'
+OrderRowsForHeatmap = function( X, 
+                                outlier_cutoff = 0.2, 
+                                wrap = T,
+                                REORDERFUN_outlier = function(x, ...) {
+                                  x %>% dist %>% hclust %>% as.dendrogram %>% (stats::reorder)
+                                }, ... ){
+  X %<>% as.data.frame
+  
+  # Calculate max for each row.
+  idx_max = apply(X, 1, which.max)
+  idx_max_ctr   = cbind( 1:nrow(X), idx_max )
+  idx_max_left  = cbind( 1:nrow(X), idx_max - 1 )
+  idx_max_right = cbind( 1:nrow(X), idx_max + 1 )
+  
+  if( wrap ){
+    # Alter indices: 0 becomes n, n+1 become
+    has_neighbor_left  = rep( T, length( idx_max ) )
+    has_neighbor_right = rep( T, length( idx_max ) )
+    replace_a_with_b = function( x, a, b ){x[x==a]=b; return(x)}
+    ncx = ncol(X)
+    idx_max_left[, 2] %<>% replace_a_with_b( a = 0, b = ncx) %>% replace_a_with_b( a = ncx+1, b = 1)
+    idx_max_right[, 2] %<>% replace_a_with_b( a = 0, b = ncx) %>% replace_a_with_b( a = ncx+1, b = 1)
+  } else {
+    # Remove indices referring to nonexistent entries
+    has_neighbor_left  = ( idx_max!=1 )
+    has_neighbor_right = ( idx_max!=ncol( X ) )
+    idx_max_left  = idx_max_left[  has_neighbor_left, ]
+    idx_max_right = idx_max_right[ has_neighbor_right, ]
+  }
+  
+  # Calculate scores to order by
+  major_score = idx_max
+  minor_score = rep(0, length(major_score))
+  minor_score[has_neighbor_left ] %<>% subtract( X[idx_max_left ] )
+  minor_score[has_neighbor_right] %<>% add(      X[idx_max_right] )
+  
+  return(rownames(X)[order(major_score, minor_score, decreasing = F)])
+  
+  # Treatment of outlier rows is not yet implemented.
+  # get_outlier_score = function( x, max_idx ){
+  #   away_from_max = subset(seq_along(x), abs( seq_along(x) - max_idx ) > 1 ) 
+  #   sum(x[away_from_max]) / sum(x)
+  # }
+  
+}
+
+```
+
+
+###Useful sample groupings
+
+#####Whole samples (`whole_e*`)
+
+The goal here is to find out what cell subpopulations are present at the earliest stage of thymus formation. We expect to see thymus and parathyroid tissue, and we expect to cell epithelial cells, mesenchymal cells, and blood. This dataset contains three biological replicates from Venus mice dissected at embryonic day 12.5 and likewise for wildtype mice at day 13.5. UPDATE: added the day 14.5 data to the `whole_organ` samples on 2016 Nov 28.
+
+These analyses are for a first pass. Once we identify some clusters of interest, we can load the data back in, subset them, and look for interesting subpopulations.
+
+#####Time-series of sorted samples (`time_sorted_*`)
+
+The goal here is to take a look at the days leading up to thymus specification. We want to see when various subpopulations start to become well-defined and what genes seem to be implicated. There are strong temporal effects, so in addition to looking at days 10.5-12.5 together, we look at them day by day. One analysis also adds in day 13.5.
+
+#####In-vitro cell lines
+
+These cell lines are from the lab's attempts at human and mouse thymus production in a dish. We want to compare them to the timeseries data and see where they fit in (and what to do next!).
+
+```{r}
+# Returns a list of character vectors named by sample type with entries containing 
+# sample IDs of all replicates of that sample type. Omits in vitro data.
+get_data_by_replicates = function(){
+  replicates = get_sample_groups( c( "whole_e12_5",
+                                     "whole_e13_5",
+                                     "whole_e14_5", 
+                                     "whole_e15_5", 
+                                     "whole_e16_5",
+                                     "whole_e17_5",
+                                     "whole_e18_5",
+                                     "whole_p0",
+                                     "whole_adult",
+                                     "human_patient",
+                                     "time_sorted_9", 
+                                     "time_sorted_10",    
+                                     "time_sorted_11", 
+                                     "time_sorted_12",   
+                                     "time_sorted_13",   
+                                     "time_sorted_16",
+                                     "FTOC_RA_RA",
+                                     "FTOC_RA_BMS",
+                                     "FTOC_RA_CTRL",
+                                     "optimization"), combine = F )
+  return( replicates )
+}
+
+# If `combine==T`, then this function returns a single vector with all unique sample names.
+# Otherwise (default), the return value is a list of vectors of sampleids that go together 
+# for various analytic themes. These themes are reflected in the list's names.
+# If you put in "whole_organ" or "sorted_timeseries" or "in_vitro", you get one of the datasets above.
+# If you put in "all", you get everything from the embryonic mouse thymus.
+# If you put in anything else, it gets used as a list index, and you'll have to RTFS (sorry!) 
+# to see the options available. For example, if you just want the day 12.5 data from the whole 
+# organ, put "whole_e12_5"; if you just want the human in-vitro cells, put "vitro_human".
+
+get_sample_groups = function(analyses = "whole_organ", combine = F){
+  
+  whole_organ = list(whole_e12_5 = c( "e12_5wholeThy_venus",
+                                      "e12_5wholeThy_venus_rep2",
+                                      "e12_5wholeThy_venus_rep3" ),
+                     whole_e13_5 = c( "e13_5wholeThy_wt_rep3",
+                                      "e13_5_wholeThymus_wt_rep4",
+                                      "e13_5_wholeThymus_wt_rep5" ),
+                     whole_e13_5_pth = c( "e13_5wholeThy_wt_rep2",
+                                          "e13_5wholeThy_wt" ),
+                     whole_e14_5 = c( "E14_5_WholeThy_rep2",
+                                      "E14_5_WholeThy_rep4" ),
+                     whole_e15_5 = c( "E15_5_WholeThy_Rep1",
+                                      "E15_5_WholeThy_Rep2" ),
+                     whole_e16_5 = c( "e16_5_wholeThymus_wt_rep1",
+                                      "E16_5_WholeThy_Rep2_combine",
+                                      "E16_5_WholeThy_Rep3_combine" ),
+                     whole_e17_5 = c( "E17_5_WholeThy_rep1", 
+                                      "E17_5_WholeThy_rep2" ),
+                     whole_e18_5 = c( "E18_5_WholeThy_rep1",
+                                      "E18_5_WholeThy_rep2" ),
+                     whole_p0    = c( "P0_LeftLobe",
+                                      "P0_RightLobe"),
+                     whole_adult = c( "adult_thy_rep1",
+                                      "adult_thy_rep2" ),
+                     human_patient = c( "hThymus_C_Epcam",
+                                        "hThymus_D_Epcam" ) ) 
+  
+  sorted_timeseries = list(time_sorted_9     = c( "e9_5",
+                                                  "e9_5_rep2"),
+                           time_sorted_10    = c( "e10_5",
+                                                  "e10_5rep3" ),
+                           time_sorted_11    = c( "e11_5rep3",
+                                                  "e11_5rep4" ),
+                           time_sorted_12    = c( "e12_5rep4",
+                                                  "e12_5rep3" ),
+                           time_sorted_13    = c( "e13_5rep2",
+                                                  "e13_5rep3" ),
+                           time_sorted_16 = c("e16_5EpCAM_rep1",
+                                              "e16_5EpCAM_rep2") )
+  
+  RA_perturbation = list( FTOC_RA_RA   = c( "FTOC_RA_rep1", 
+                                            "FTOC_RA_rep2", 
+                                            "FTOC_RA_rep3" ),
+                          FTOC_RA_CTRL = c( "FTOC_PBSDMSO_rep1",
+                                            "FTOC_PBSDMSO_rep2",
+                                            "FTOC_PBSDMSO_rep3" ),
+                          FTOC_RA_BMS  = c( "FTOC_BMS493_rep1",
+                                            "FTOC_BMS493_rep2",
+                                            "FTOC_BMS493_rep3" ) )
+  
+  in_vitro = list( optimization = c( "NoRNaseInh",
+                                     "NoRNaseInh_1hour",
+                                     "RNaseInh",
+                                     "RNaseInh_1hour" ), 
+                   vitro_mouse = c( "P2lox40_ESC_Live_1",
+                                    "P2lox40_EPI_Live_1",
+                                    "P2lox40_DE_Live_1",
+                                    "P2lox40_6DPFE_Epcam",
+                                    "P2lox40_14DPFE_Epcam"),
+                   vitro_human = c( "hESC_rep2_seq2",
+                                    "hESC_rep3_seq2",
+                                    "hDE_H1_R",
+                                    "hDE_rep3_seq2",
+                                    "hAFE_rep1",
+                                    "hAFE_rep2_seq2",
+                                    "hPFE_rep2",
+                                    "hPFE_H1",
+                                    "hTEP_rep2",
+                                    "hTEP_H1",
+                                    "hTEPnew2_rep1",
+                                    "hTEPnew_rep1",
+                                    "hTEP_Control_H1LucGFP" ) )
+  
+  # Avoid eight different `else if` thingies 
+  if( combine ){
+    merge_list_or_not = function( x ) return( Reduce( f = union, x = x ) )
+  } else {
+    merge_list_or_not = function( x ) return( x )
+  }
+  
+  # return the right thing
+  if( identical( analyses, "whole_organ")) {
+    return( merge_list_or_not( whole_organ ) )
+  } else if( identical(analyses, "sorted_timeseries" )){
+    return( merge_list_or_not( sorted_timeseries ) )
+  } else if( identical( analyses, "RA_perturbation" ) ){
+    return( merge_list_or_not( RA_perturbation ) )
+  } else if( identical( analyses, "in_vitro" ) ){
+    return( merge_list_or_not( sorted_timeseries ) )
+  } else if( identical( analyses, "all" ) ){
+    return( merge_list_or_not( c(whole_organ, sorted_timeseries, in_vitro ) ) )
+  } else {
+    to_return = c( whole_organ, sorted_timeseries, RA_perturbation, in_vitro ) [analyses]
+    if(length(to_return) == 0){ warning("No samples matched the analytic theme given.") }
+    return( merge_list_or_not( to_return ) )
+  }
+}
+
+# # This function returns a giant Seurat object containing the in-vivo versus in-vitro dataset.
+# # It has a metadata field cell_type that gives either eday (if in vivo) or e.g. "PFE_6", "DE".
+get_vivo_versus_vitro_data = function( results_path, test_mode = F, include_human = F ){
+  if( include_human ){
+    vivo_vs_vitro = get_sample_groups( c( "time_sorted_10_13", "vitro_mouse", "vitro_human" ), combine = T )
+    levels_in_order = c( "mESC", "mEPI", "mDE", "mPFE_6", "mPFE_14", 
+                         "10.5", "11.5", "12.5", "13.5", 
+                         "hESC", "hDE", "hAFE",  "hPFE", "hTEP")
+  } else {
+    vivo_vs_vitro = get_sample_groups( c( "time_sorted_10_13", "vitro_mouse" ), combine = T )
+    levels_in_order = c( "mESC", "mEPI", "mDE", "mPFE_6", "mPFE_14", 
+                         "10.5", "11.5", "12.5", "13.5" )
+  }
+  raw_dge = dge_merge_list( load_thymus_profiling_data( sample_ids = vivo_vs_vitro, test_mode = test_mode ) )
+  dge = seuratify_thy_data( raw_dge, results_path, test_mode = test_mode )
+  dge = add_maehrlab_metadata( dge )
+  dge = add_maehrlab_metadata( dge, variable_to_add = "source_tissue" )
+  dge = add_maehrlab_metadata( dge, variable_to_add = "species" )
+  
+  # # The next few lines assume that the only in vivo data is the mouse embryo data.
+  in_vivo_indicator = ( dge@data.info$source_tissue %in% c( "embryo" ) )
+  cell_type                      = as.character( dge@data.info$source_tissue )
+  cell_type[ in_vivo_indicator ] = as.character( dge@data.info$eday[ in_vivo_indicator ] )
+  names( cell_type ) =   rownames( dge@data.info )
+  dge = Seurat::AddMetaData( dge, metadata = cell_type, col.name = "cell_type")
+  dge@data.info$cell_type = factor(dge@data.info$cell_type, 
+                                   levels = levels_in_order,
+                                   ordered = T) 
+  if( include_human ){
+    dge = remove_species_specific_genes( dge, results_path = file.path( results_path, "QC" ) )
+  }
+  return(dge)
+}
+```
+
+###Basic QC
+
+```{r}
+
+
+# # This function checks for consistency across replicates as returned by `get_data_by_replicates`.
+# # It plots avg expression for each gene and proportion expressing each gene.
+scatterplot_replicates = function( results_path, data_by_replicate = get_data_by_replicates() ){
+  for( sample_type in names( data_by_replicate ) ){
+    sample_ids = data_by_replicate[[sample_type]]
+    reps = load_thymus_profiling_data( sample_ids = sample_ids )
+    all_genes = Reduce( x = lapply( reps, rownames ),f = union )
+    # Initialize empty arrays
+    mean_expr_by_gene = as.data.frame( matrix( 0, ncol = length( sample_ids ), nrow = length( all_genes ) ) )
+    colnames( mean_expr_by_gene ) = sample_ids
+    rownames( mean_expr_by_gene ) = all_genes
+    prop_expr_by_gene = mean_expr_by_gene
+    # Plot expression by gene both as log1p mean expression and proportion expressing.
+    for( rep_id in sample_ids ){
+      mean_expr_by_gene[ rownames(reps[[rep_id]]), rep_id ] = rowMeans( log1p( reps[[rep_id]]   ) )
+      prop_expr_by_gene[ rownames(reps[[rep_id]]), rep_id ] = rowMeans(        reps[[rep_id]] > 0 ) 
+    }
+    dir.create.nice( file.path( results_path, "rep_check_total" ) )
+    pdf( file.path( results_path, "rep_check_total", paste0( sample_type, ".pdf" ) ) ) 
+    {
+      plot_pairs( mean_expr_by_gene, main = "Total expression by gene" )
+    } 
+    dev.off()
+    
+    dir.create.nice( file.path( results_path, "rep_check_prop" ) )
+    pdf( file.path( results_path, "rep_check_prop", paste0( sample_type, ".pdf" ) ) ) 
+    {
+      plot_pairs( prop_expr_by_gene, main = "Proportion expressing each gene" )
+    } 
+    dev.off()
+    
+  }
+}
+
+
+# # Given a matrix, scatterplots all pairs of columns.
+#' 
+plot_pairs = function( X, main = "" ){
+  D = ncol( X )
+  for( ii in 1:D ){
+    for( jj in 1:ii ){
+      # linear_index = (ii - 1)*D + jj
+      if( ii == jj ){
+        # could do histogram here, but I don't want to
+      } else {
+        Y = data.frame( X[[ii]], X[[jj]], rownames( X ) )
+        colnames( Y ) = c( colnames( X )[ c(ii, jj) ], "gene" )
+        r = cor(Y[, 1], Y[, 2])
+        p =  ggplot( Y ) + ggtitle( paste0( main, " (r = ", round(r, 2), ")" ) ) + 
+          geom_point( aes_string( x = colnames(Y)[[1]], y = colnames(Y)[[2]] )) 
+        print( p ) 
+      }
+    }
+  }
+}
+
+
+```
+
+```{r}
+
+save_complexity_plot = function(dge, result_path){
+  dir.create.nice( file.path( result_path, "QC" ) )
+  f = file.path(result_path, "QC/complexity.pdf")
+  p = ggplot( data.frame( complexity = colSums( dge@raw.data > 0 ) ) ) + 
+    ggtitle("Complexity") + geom_histogram(aes(x = complexity)) 
+  ggsave(f, p)
+  f = file.path(result_path, "QC/UMIs_by_cell.pdf")
+  p = ggplot( data.frame( UMIs_by_cell = colSums( dge@raw.data ) ) ) + 
+    ggtitle("UMIs per cell") + geom_histogram(aes(x = log10(UMIs_by_cell)))
+  ggsave(f, p)
+}
+
+```
+
+
+
+####Differential expression wrappers
+
+```{r}
+
+#' Get the order of the tips from an object of class phylo from the APE package.
+#'
+extract_tip_order = function( ape_phylo_object ){
+  is_tip = ape_phylo_object$edge[,2] <= length(ape_phylo_object$tip.label)
+  ordered_tips = ape_phylo_object$edge[is_tip, 2]
+  ape_phylo_object$tip.label[ordered_tips]
+}
+
+
+#' Stratify cells using a classifier, then test for effects of a treatment within each cell type. 
+#'
+#' @param dge_test
+#' @param dge_train
+#' @param ident.use
+#' @param treatment_var
+#' @param treatment_1 @param treatment_2 
+#' @param ... Extra args passed to DiffExpByType
+#' 
+#' @export
+#'
+DiffExpAfterClassifier = function( dge_test, 
+                                   dge_train, 
+                                   ident.use,
+                                   treatment_var,
+                                   treatment_1, 
+                                   treatment_2, ... ){
+  # Classify
+  dge_test = knn_classifier( dge_train = dge_train, 
+                             dge_test = dge_test, 
+                             ident.use = ident.use )
+  
+  
+  # Differential expression by type
+  DiffExpByType( dge = dge_test,
+                 treatment_var = treatment_var,
+                 treatment_1 = treatment_1, 
+                 treatment_2 = treatment_2 )
+}
+
+#' Test for effects of a treatment within cell types. 
+#'
+#' @param dge
+#' @param treatment_var
+#' @param treatment_1 @param treatment_2
+#' @param cell_type_var
+#'
+#' @export
+#'
+DiffExpByType = function( dge,
+                          treatment_var,
+                          treatment_1, 
+                          treatment_2,
+                          cell_type_var = "classifier_ident", ... ){
+  
+  # This is a workaround for an error that appears in SubsetDataFlex when the result has only one cell.
+  # I should fix it, but that would be useless for differential expression testing anyways.
+  ct_counts = FetchData(dge, cell_type_var)[[1]] %>% table
+  if( any( ct_counts < 2 ) ){
+    # You see the cat during execution. Meow. The warning appears only afterwards.
+    cat(     "You won't test some cell types because there are too few cells.\n")
+    warning( "Didn't test some cell types because there are too few cells.\n")
+  }
+  ct_counts = ct_counts[ct_counts>=2]
+  ct_levels = names(ct_counts)
+
+  de_gene_tables = as.list(ct_levels)
+  names(de_gene_tables) = ct_levels
+  for( ct in ct_levels ){
+    dge_ct = SubsetDataFlex( dge,
+                             vars.use = cell_type_var, 
+                             predicate = paste0( cell_type_var, "==", "'", ct, "'" ) )
+
+    de_gene_tables[[ct]] = tryCatch(FindMarkersFlex( dge_ct,
+                                                     ident.use = treatment_var, 
+                                                     ident.1 = treatment_1, 
+                                                     ident.2 = treatment_2, ... ) ,
+                                    error = function(e) return(NULL))
+    rm(dge_ct)
+  }
+  return( de_gene_tables )
+}
+
+
+#' Save a list of tables with optional filtering.
+#'
+SaveMarkerTables = function( de_gene_tables, results_path, filter_name = "all", filter_predicate = "TRUE" ){
+  my_rp = file.path(results_path, "markers")
+  dir.create.nice(file.path(my_rp, filter_name) )
+  my_subset = function(x) subset(x, eval(parse(text=filter_predicate)))
+  de_gene_tables_filtered = lapply(de_gene_tables, my_subset )
+  mapply( write.table, de_gene_tables_filtered, 
+          file.path(file.path(my_rp, filter_name), names( de_gene_tables ) %>% paste0(".txt")),
+          row.names = F, quote = F, col.names = T, sep = "\t")
+ 
+}
+
+
+tidy_marker_table = function (X) {
+  X$p.value = NULL
+  X$avg_diff %<>% round(2)
+  X$pct.1 %<>% round(2)
+  X$pct.2 %<>% round(2)
+  if(!is.null(X$q.value)){
+    X$`-log10q` = X$q.value %>% as.numeric %>% log10 %>% multiply_by(-1) %>% as.numeric
+    X$q.value = NULL
+    X$`-log10q` %<>% round(2)
+  }
+  return(X)
+}
+
+#' Perform all pairwise comparisons.
+#'
+#' @param levels_in_order Specifies the levels of FetchData(dge, ident.use) to be tested. The ordering
+#' determines which cluster is "ident.1": in c("TEC", "BLD", "MES"), "TEC" is always "ident.1".
+#' @param ident.use Fetched from dge to define the cell clusters that are being contrasted.
+#' @param dge Seurat object.
+#' @param ... Extra args passed to FindMarkersFlex via mapply( <stuff>, moreArgs = list(<stuff>, ...)).
+#'
+#' @export
+#'
+TestPairwise = function( dge, ident.use = "cell_type", 
+                         levels_in_order = FetchData(dge, ident.use)[[1]] %>% levels, ... ){
+
+  # Generate combinations
+  types = factor(levels_in_order, levels = levels_in_order, ordered = T )
+  comparisons = combn(types, 2)
+  comparisons_ = matrix("", nrow(comparisons), ncol(comparisons))
+  comparisons_[1, ] = as.character(comparisons[1, ] )
+  comparisons_[2, ] = as.character(comparisons[2, ] )
+  comparisons = comparisons_
+  
+  # Run tests
+  de_gene_tables = mapply( FindMarkersFlex,
+                           ident.1 = comparisons[1, ],  
+                           ident.2 = comparisons[2, ], 
+                           SIMPLIFY = F,
+                           MoreArgs = list(object = dge, ident.use = ident.use, ...) )
+  names( de_gene_tables ) = apply(comparisons, 2, paste0, collapse = "_v_")
+  return( de_gene_tables )
+}
+
+```
+
+####Pathway analysis
+
+```{r, eval = FALSE}
+
+library(biomaRt) # Prepare for death by "Maximum number of DLL's reached"
+
+#' Make a heatmap of GO term activity by cell type.
+#'
+#' @param cluster_markers Cluster markers. List of character vectors named with cluster names. 
+#' @param effect_measure How to allocate the "heat". Can be "pval" (-log10 p value from Fisher exact test),
+# "overlap" (number of markers overlapping the annotation term) or 
+#' "sum" (sum of expression of genes within that annotation term).
+#' If you pick "sum", then the dge input must be provided.
+#' @param wrap Passed to OrderRowsForHeatmap.
+#' @param dge Required if effect_measure is 'sum'.
+#' @param ident.use Determines cells to fetch from dge for each cluster. Gets matched with names(cluster_markers).
+#' @param desired_db Databases to draw annotations from. Can be any of:
+#'           "GO_Biological_Process_2015"
+#'           "GO_Molecular_Function_2015"
+#'           "GO_Cellular_Component_2015"
+#'           "KEGG_2016"
+#'           "MGI_Mammalian_Phenotype_Level_3"
+#'           "MGI_Mammalian_Phenotype_Level_4" 
+#'
+make_go_heatmap = function( cluster_markers,
+                            num_genes_tested,
+                            effect_measure = "overlap",
+                            desired_db = c("KEGG_2016", 
+                                           "GO_Biological_Process_2015"), 
+                            wrap = F,
+                            dge = NULL, 
+                            ident.use = "ident" ){
+  if( is.null( dge ) && (effect_measure == "sum") ){
+    stop( "If effect_measure == 'sum', you must provide a Seurat object as the 'dge' arg. \n" )
+  }
+  if( !is.null( dge ) && (effect_measure != "sum") ){
+    warning( "If effect_measure != 'sum', the 'dge' arg is ignored. \n" )
+  }
+  edb = c("GO_Biological_Process_2015", 
+          "GO_Molecular_Function_2015", 
+          "GO_Cellular_Component_2015", 
+          "KEGG_2016",
+          "MGI_Mammalian_Phenotype_Level_3",
+          "MGI_Mammalian_Phenotype_Level_4" )
+  if( length(desired_db) == 0 | !all( desired_db %in% edb ) ){
+    cat(c("Eligible databases:", edb ))
+  }
+  
+  enrichr_results = mapply( function( ... ) tryCatch( do_enrichr( ... ), error = function( e ) return( NULL ) ), 
+                            geneset = cluster_markers, 
+                            geneset_name = paste0(names(cluster_markers), "_up"),
+                            MoreArgs = list(
+                              desired_db = desired_db,
+                              results_path = file.path( results_path, "enrichr_temp" )
+                            ), 
+                            SIMPLIFY = FALSE )
+  
+  all_together = Reduce(rbind, enrichr_results )
+  genes_by_term = get_genes_from_annot( annot = all_together )
+  terms_with_genes = aggregate_nice(genes_by_term, genes_by_term$category, FUN = function(x) paste0(unique(x), collapse = " "))
+  # Disambiguate terms used by multiple DB's, then exclude dupes.
+  terms_with_genes[, "annot_readable"] = paste0( terms_with_genes[, "annot_readable"],
+                                                 " (", 
+                                                 terms_with_genes[, "database"],
+                                                 ")" )
+  terms_with_genes = terms_with_genes[!duplicated(as.data.frame(terms_with_genes)), ]
+  get_effect = function( markers, cluster = NULL, term_genes, total = num_genes_tested ){
+    term_genes = strsplit(x=term_genes, split = " ")[[1]]
+    my_mat = matrix(c(
+      total,
+      length(markers),
+      length(term_genes),
+      length(intersect(markers, term_genes))
+    ), nrow = 2)
+    if(effect_measure=="pval"){
+      return( -log10(fisher.test( my_mat )$p.value) )
+    } else if(effect_measure=="overlap"){
+      return( fisher.test( my_mat )$estimate )
+    } else if(effect_measure=="sum"){
+      cell_sums = FetchDataZeroPad( dge, term_genes ) %>% rowSums
+      cell_sums = cell_sums[FetchData( dge, ident.use )[[1]] == cluster]
+      return( mean( cell_sums ) )
+    } else {
+      stop("effect_measure should be 'pval', 'overlap', or 'sum'.\n")
+    }
+  }
+  effects_by_celltype = data.frame(matrix(NA, 
+                                          nrow = nrow(terms_with_genes),
+                                          ncol = length(cluster_markers) ))
+  rownames(effects_by_celltype) = terms_with_genes[, "annot_readable"]
+  colnames(effects_by_celltype) = names(cluster_markers)
+  for( annot_idx in 1:nrow(terms_with_genes) ){
+    effects_by_celltype[annot_idx, ] = mapply( get_effect, 
+                                               markers = cluster_markers,
+                                               cluster = names(cluster_markers),
+                                               MoreArgs = list( term_genes = terms_with_genes[annot_idx, "gene"] ) )
+  }
+  effects_by_celltype %<>% apply(1, div_by_max) %>% t %>% as.data.frame
+  effects_by_celltype[is.na(effects_by_celltype)] = 0
+  term_order = OrderRowsForHeatmap( effects_by_celltype, wrap = wrap )
+  effects_by_celltype$annot_readable = factor( terms_with_genes[, "annot_readable"], levels = term_order, ordered = TRUE )
+  effects_by_celltype_long = reshape2::melt(effects_by_celltype, id.vars = "annot_readable")
+  return(ggplot(effects_by_celltype_long) + geom_tile(aes(x = variable, y = annot_readable, fill = value)))
+}
+
+#' Given a Mammalian Phenotype Ontology id such as "MP:0005375", retrieve the corresponding genes. 
+#'
+retrieve_mp_genes = function( phenotypeID ){
+  # Used to use this for GO terms, but I found out it was only pretending to work.
+  if(strsplit(phenotypeID, split = ":")[[1]][[1]] == "GO"){
+    stop("This function cannot be used for GO terms.")
+  }
+  query = paste0('<query model="genomic" view=" Gene.symbol " >
+                  <constraint path="Gene.ontologyAnnotations.ontologyTerm.identifier" op="=" code="A" value="',
+                  phenotypeID, '" />
+                </query>')
+  postRes = httr::POST('http://www.mousemine.org/mousemine/service/query/results',
+                       body=list(query=query, format='json'),
+                       encode='form')
+  json_to_text = jsonlite::fromJSON(httr::content(postRes, as = "text")) 
+  json_to_table = data.frame(json_to_text$results, stringsAsFactors = F)
+  if(ncol( json_to_table ) >= 1){
+    return(json_to_table[[1]])
+  } else {
+    return( character() )
+  }
+}
+
+#' Given a Mammalian Phenotype Ontology id such as "MP:0005375", retrieve the corresponding genes. 
+#'
+#' Works for GO terms also (e.g. GO:54321).
+mouse_GO_db = GOSemSim::load_OrgDb("org.Mm.eg.db")
+human_GO_db = GOSemSim::load_OrgDb("org.Hs.eg.db")
+retrieve_go_genes = function( phenotypeID ){
+  prefix = strsplit( phenotypeID, split = ":" )[[1]][[1]]
+  suffix = strsplit( phenotypeID, split = ":" )[[1]][[2]]
+  if(prefix=="GO"){
+    res_mm = suppressMessages(select(mouse_GO_db,
+                                     keys = phenotypeID,
+                                     keytype = "GOALL",
+                                     columns="SYMBOL"))
+    res_hs = suppressMessages(select(human_GO_db,
+                                     keys = phenotypeID,
+                                     keytype = "GOALL",
+                                     columns="SYMBOL"))
+    
+    res_mm = res_mm$SYMBOL %>% unique
+    res_hs = res_hs$SYMBOL %>% unique %>% get_ortholog(from = "human", to = "mouse") %>% unique
+  } 
+  return( union( res_mm, res_hs ) )
+}
+
+cell_surface_genes_preloaded = retrieve_go_genes("GO:0016020") %>% unique %>% sort
+get_cell_surface_genes = function(){
+  return(cell_surface_genes_preloaded)
+}
+
+#' Convert an atomic vector x into a list of shorter atomic vectors y
+#' such that x == Reduce( y, f = c ).
+chunkify = function(x, max_len){
+  y = 1:ceiling( length(x) / max_len ) %>% as.list
+  remainder = mod( length( x ), max_len )
+  for( i in seq_along(y) ){
+    if( (remainder != 0) & (i == length( y )) ){
+      y[[i]] = x[ max_len*(i-1) + (1:remainder) ]
+    } else {
+      y[[i]] = x[ max_len*(i-1) + (1:max_len)]
+    }
+  }
+  return(y)
+}
+
+#' Convert a KEGG gene ID into a mouse gene symbol.
+#'
+kegg_to_mouse_symbol = function( kegg_gene_symbols ){
+  try_kegg = function( kegg_symbol_subset ){ 
+    tryCatch( KEGGREST::keggConv("ncbi-geneid", kegg_symbol_subset), 
+              error = function(e) { "#KEGGCONV_ERROR" })
+  }
+  ncbi = kegg_gene_symbols %>% chunkify( 200 ) %>% lapply( try_kegg ) %>% Reduce(f = c)
+  num_errors = sum( "#KEGGCONV_ERROR" == ncbi )
+  if( num_errors > 0 ){
+    warning( num_errors, " failed out of ", length(ncbi), " identifiers fed to KEGGREST::keggConv.\n" )
+  }
+  ncbi_clean = ncbi[ncbi != "#KEGGCONV_ERROR"]
+  ncbi_clean %<>% gsub( pattern = "^.*:", replacement = "")
+  symbol = mygene::getGenes(geneid = ncbi_clean)$symbol
+  symbol %<>% unique 
+  symbol = symbol[!is.na(symbol)]
+  symbol_mouse = sapply(symbol, get_ortholog, from = "human", to = "mouse")
+  return( symbol_mouse )
+}
+
+#' From Enrichr output, obtain genes.
+#' 
+#' @param annot Dataframe with columns "database" (enrichr database name conventions) and "category" (annotation terms from Enrichr).
+#' Column "database" is currently ignored, as only GO terms can be handled.
+#'
+get_genes_from_annot = function( annot ){
+  enrichr_to_simple_db_names = c( "GO_Biological_Process_2015" = "GO",
+                                  "GO_Molecular_Function_2015" = "GO",
+                                  "GO_Cellular_Component_2015" = "GO", 
+                                  "KEGG_2016" = "KEGG", 
+                                  "MGI_Mammalian_Phenotype_Level_3" = "MP",
+                                  "MGI_Mammalian_Phenotype_Level_4" = "MP" )
+  
+  if(!all(annot$database %in% names(enrichr_to_simple_db_names))){
+    avail_csv = paste0( names( enrichr_to_simple_db_names ), collapse = ", ")
+    warning(paste0("The only available databases are: \n", avail_csv))
+  }
+  
+  # # Accept only databases for which we have access to gene lists by term
+  annot %<>% subset( database %in% names( enrichr_to_simple_db_names ) )
+  annot %<>% (dplyr::mutate)( database = enrichr_to_simple_db_names[database] )
+  annot$category = annot$Term
+  idx_go = which(annot$database == "GO")
+  idx_mp = which(annot$database == "MP")
+  idx_kegg = which(annot$database == "KEGG")
+
+  # Define some single-use "styrofoam" helper functions
+  get_before_parens     = function(x) strsplit(x, split = "\\(") %>% sapply(down_idx)
+  get_from_parens       = function(x) strsplit(x, split = "\\(|\\)") %>% sapply(extract, 2)
+  get_before_underscore = function(x) strsplit(x, split = "_") %>% sapply(down_idx)
+  not1 = function(x) x[-1]
+  get_after_underscore = function(x) strsplit(x, split = "_") %>% lapply(not1) %>% sapply(paste0, collapse = " ") 
+  mp_to_mp_colon = function(x) gsub(x=x, pattern = "MP", replacement = "MP:")
+  last8 = function(x) substr( x, start = nchar( x ) - 7, stop = nchar( x ) )
+  notlast8 = function(x) substr( x, start = 1, stop = nchar( x ) - 8 )
+  
+  # # Split term ID's from description
+  annot$annot_readable = NA
+  # GO
+  annot$annot_readable[idx_go] = sapply( annot$category[idx_go], get_before_parens ) 
+  annot$category      [idx_go] = sapply( annot$category[idx_go], get_from_parens   ) 
+  # MP
+  annot$annot_readable[idx_mp] = sapply( annot$category[idx_mp], get_after_underscore ) 
+  annot$category      [idx_mp] = sapply( annot$category[idx_mp], get_before_underscore ) 
+  annot$category      [idx_mp] = sapply( annot$category[idx_mp], mp_to_mp_colon   ) 
+  # KEGG
+  annot$annot_readable[idx_kegg] = sapply( annot$category[idx_kegg], notlast8 ) 
+  annot$category      [idx_kegg] = sapply( annot$category[idx_kegg], last8 ) 
+  
+  # Clean up messiness
+  annot$annot_readable %<>% gsub(pattern = "_", replacement = " ", x = .)
+  annot$annot_readable %<>% gsub(pattern = "_Homo sapiens_| Homo sapiens", replacement = "", x = .)
+  annot$annot_readable %<>% gsub(pattern = "T cell", replacement = "T-cell", x = .)
+  annot$annot_readable %<>% Capitalize()
+  annot$annot_readable %<>% trimws
+  
+  genesets = as.list( annot$category ); 
+  for( i in seq_along( annot$category ) ){
+    # Retrieve geneset
+    if( i %in% idx_go ){
+      set_i = retrieve_go_genes( annot$category[[i]] )
+    } 
+    if( i %in% idx_mp ){
+      set_i = retrieve_mp_genes(phenotypeID = annot$category[[i]])
+    } 
+    if( i %in% idx_kegg){
+      set_i = KEGGREST::keggLink(annot$category[[i]])[, 2] %>% kegg_to_mouse_symbol
+    } 
+    
+    if( length( set_i ) == 0 ){ 
+      genesets[[i]] = as.data.frame(matrix(ncol = 4, nrow = 0))
+    } else {
+      genesets[[i]] = data.frame( gene = set_i, 
+                                  category       = annot$category[[i]], 
+                                  annot_readable = annot$annot_readable[[i]], 
+                                  database       = annot$database[[i]], stringsAsFactors = F ) 
+    }
+  }
+  return( Reduce( x = genesets, f = rbind ) )
+}
+
+```
+
+### Doublet detection and classification of new cells
+
+```{r}
+
+
+# # Given a named vector x with counts of various cell types, returns expected doublet quantities for each possible pairing.
+# # Make sure you only feed this one replicate at a time! You can't get doublets across replicates.
+# # Assumes a doublet rate of 5%. Your mileage (and flow rates) may vary.
+# #
+# # Output is a named numeric vector of expected cell counts. 
+# # For names, every combination of names(x) should be present once in the output.
+# # Order doesn't matter, so labels get alphabetized and concatenated with '_'.
+# # Within-cluster doublets are included.
+# # E.g. you get BLD_END and BLD_BLD but not END_BLD.
+expected_doublet_counts = function( x, rate = 0.05 ){
+  my_mat = matrix(x, nrow = length(x)) %*% matrix(x, ncol = length(x))
+  my_mat = my_mat / sum( x )
+  my_mat = my_mat*rate
+  # Count BLD_TEC and TEC_BLD together
+  for(i in 1:nrow(my_mat)){
+    for(j in 1:ncol(my_mat)){
+      if(i > j){ 
+        my_mat[i, j] = 0
+      }
+      # adding this tiny bit is a dumb hack to prevent zeroes from disappearing during summary(Matrix(, sparse = T))
+      if(i < j){ 
+        my_mat[i, j] = 2*my_mat[i, j] + 0.000001 
+      }
+      if( i==j ){
+        my_mat[i, j] = my_mat[i, j] + 0.000001 
+      }
+
+    }
+  }
+  colnames(my_mat) = names( x )
+  rownames(my_mat) = names( x )
+  dubs = summary( Matrix( my_mat, sparse = T ) ) 
+  colnames(dubs) = c("cell_type_1", "cell_type_2", "n_dubs")
+  dubs$cell_type_1 = names( x )[dubs$cell_type_1]
+  dubs$cell_type_2 = names( x )[dubs$cell_type_2]
+  dubs$n_dubs = round(dubs$n_dubs, 3)
+  postprocess = function( s1_s2 ){ paste( sort( s1_s2), collapse = "_" ) }
+  rownames( dubs ) =  apply( dubs[, 1:2], 1, postprocess )
+  dubs = setNames( dubs$n_dubs, nm = rownames(dubs))
+  return( dubs )
+}
+
+
+# # Trains and saves a penalized logistic regression classifier.
+# # Uses Seurat::FetchData(training_dge, vars.all = ident.use ) as class labels.
+# # Results (`glmnet` object) and training data (Seurat object) get
+# # saved into a subdirectory of `results_path`. 
+train_save_classifier = function(training_dge, results_path, ident.use = "cell_type", genes.use, do.save = F ){
+  
+  # # Get labels
+  training_labels = factor( vectorize_preserving_rownames ( Seurat::FetchData(training_dge, vars.all = ident.use ) ) )
+
+  # # Get features
+  genes.use = intersect( genes.use, rownames( training_dge@data ) )
+  features_tf = t( training_dge@data[ genes.use, ] )
+
+  # # Build classifier (penalized multinomial logistic regression)
+  print("Training classifier...")
+  # # alpha = 0 does L2 regression. alpha = 1 does LASSO. In between is elastic net.
+  mlr_mod = glmnet::cv.glmnet(x = features_tf, y = training_labels, family = "multinomial", alpha = 0)
+  print("... classifier trained.")
+  
+  # # Save and return
+  if(do.save){
+    dir.create.nice( file.path( results_path, "classifier" ) )
+    print("Saving classifier...")
+    saveRDS(mlr_mod,      file.path( results_path, "classifier", "glmnet_object.data" ) )
+    saveRDS(training_dge, file.path( results_path, "classifier", "training_data.data" ) )
+  }
+  return( mlr_mod )
+}
+
+get_classifier_coefs = function( mlr_mod ){
+  cell_types = names( coefficients( mlr_mod, newx = features, s = "lambda.min" ) )
+  genes = rownames( coefficients( mlr_mod, newx = features, s = "lambda.min" )[[1]] )
+  coeffs = data.frame( matrix( NA, nrow = length(genes), ncol = length( cell_types ) ) )
+  colnames( coeffs ) = cell_types
+  rownames( coeffs ) = make.unique( genes )
+  for( cell_type in cell_types ){
+    coeffs[[cell_type]] = as.vector( coefficients( mlr_mod, newx = features, s = "lambda.min" )[[cell_type]] )
+  }
+  return( coeffs )
+}
+
+#' Apply a machine learning classifier (from `train_save_classifier`) to new data
+#' 
+#' @param dge a Seurat object 
+#' @param mlr_mod a glmnet multiclass logistic regression model.
+#' You can feed the output of `train_save_classifier` into the `mlr_mod` argument.
+classify_mlr = function( dge, mlr_mod ){
+  genes_used = ( mlr_mod %>% coef %>% down_idx %>% attributes )$Dimnames %>% down_idx
+  genes_used = setdiff( genes_used, "(Intercept)" )
+  features = FetchDataZeroPad( dge, vars.all = genes_used ) %>% t
+  predictions = predict( mlr_mod, newx = features, s = "lambda.min", type = "response" )[, , 1]
+  return( predictions )
+}
+
+#' Visualize probabilistic classification results
+#'
+#' @param dge a Seurat object
+#' @param results_path folder to place output in
+#' @param mlr_mod a glmnet multiclass logistic regression model. Give this or `class_labels`, not both.
+#' You can feed the output of `train_save_classifier` into the `mlr_mod` argument.
+#' @param class_labels atomic character vector naming columns in the Seurat object that contain
+#'  class probabilities. Give this or `mlr_mod`, not both. If names(class_labels) is filled in,
+#'  then that's how the spokes get labeled.
+#' @param fig_name filename for output.
+#' @param facet_by Variable in Seurat object to facet resulting plots by; default is none
+#' @param colour_by Variable in Seurat object to map color to; default is none
+#' @param fig_name filename for output.
+#' @param style If "points", plot each cell as a dot. 
+#' If "density", then instead of plotting points, plot 2d density contours.
+#' If "hexagons", do AWESOME HEXAGON BINNING YEAHHHHHHH HEXAGONS.
+#' @param wheel_order Deprecated.
+#' @param do.density Deprecated.
+wheel_plot = function( dge, results_path, mlr_mod = NULL, class_labels = NULL, fig_name, 
+                       colour_by = NULL, facet_by = NULL, style = "points",
+                       wheel_order = NULL, do.density = NULL ){
+  # # Handle stupid old input
+  if(!is.null(wheel_order)){
+    warning( "`wheel_order` arg is deprecated. Use `class_labels` instead." )
+    if( is.null( class_labels ) ){ class_labels = wheel_order} 
+  }
+  
+  if( !is.null(do.density) && do.density){ 
+    warning("do.density is deprecated. Use ` style = \"density\" ` instead.")
+    style = "density"
+  }
+  
+  # # Handle regular, non-stupid input
+  mlr_mod_given = !is.null( mlr_mod )
+  labels_given = !is.null( class_labels )
+  if( !mlr_mod_given & !labels_given ){
+    stop("Please specify either `mlr_mod` or `class_labels`")
+  } else if( !mlr_mod_given & labels_given ) {
+    cat( "Fetching stored predictions from Seurat object.\n" )
+    predictions = FetchData( dge, vars.all = class_labels ) %>% as.matrix
+  } else if( mlr_mod_given & !labels_given ) {
+    cat( "Making predictions from glmnet object.\n" )
+    predictions = classify_mlr( dge, mlr_mod )
+    class_labels = colnames( predictions )
+  } else if( mlr_mod_given & labels_given ) {
+    cat( "Making predictions from glmnet object.\n" )
+    warning( "Since `mlr_mod` was given, using `class_labels` 
+             only to order wheel spokes, not to fetch stored predictions." )
+    predictions = classify_mlr( dge, mlr_mod )
+    class_labels = colnames( predictions )
+  }
+  
+  # # Make wheel
+  lp1 = length( class_labels ) + 1 
+  if( is.null( names( class_labels ) ) ){ names( class_labels ) = class_labels }
+  unwrapped_circle = seq( 0, 2*pi, length.out = lp1 )
+  wheel_spokes = data.frame( z = names( class_labels ), 
+                             x = cos( unwrapped_circle[-lp1] ), 
+                             y = sin( unwrapped_circle[-lp1] ) )
+  # # Process data
+  cat("Processing data.\n")
+  cell_positions = predictions %*% as.matrix( wheel_spokes[, c("x", "y")] )
+  cell_positions = as.data.frame( cell_positions );   colnames( cell_positions ) = c( "x", "y" )
+  if( !is.null( colour_by ) ){
+      cell_positions[[colour_by]] = Seurat::FetchData(dge, vars.all = colour_by)[ rownames( predictions ),  ] 
+  }
+  if( !is.null( facet_by ) ){
+    cell_positions[[facet_by]] = Seurat::FetchData(dge, vars.all = facet_by )[ rownames( predictions ),  ] 
+  }
+  
+  # # Avoid possible namespace conflict between class_labels in model parameters and class_labels in test data
+  if( "class_labels" %in% c( facet_by, colour_by ) ){
+    wheel_spokes$class_labels_in_model = wheel_spokes$class_labels
+    wheel_spokes$class_labels = NULL
+  }
+  
+  # # Add wheel & label spokes
+  wheel_plot = ggplot()   + geom_path ( data = wheel_spokes,   mapping = aes(     x,     y ) )
+  wheel_plot = wheel_plot + geom_text ( data = wheel_spokes,   mapping = aes( 1.2*x, 1.2*y, label = z ) )
+  # # Add data & facet
+  if( style == "density"){
+    cat( "Estimating density.\n" )
+    wheel_plot = wheel_plot + geom_density_2d( data = cell_positions, 
+                                               mapping = aes_string( "x", "y", colour = colour_by ) )
+  } else if( style == "hexagons"){
+    if( !is.null( colour_by ) ) {
+      warning( "Won't use color with style==\"hegaxons\" because fill is mapped to bin count. " )
+    }
+    wheel_plot = wheel_plot + geom_hex( data = cell_positions, mapping = aes_string( "x", "y" ) ) 
+    wheel_plot = wheel_plot + scale_fill_gradient(trans = "log")
+  } else {
+    wheel_plot = wheel_plot + geom_point( data = cell_positions, 
+                                          mapping = aes_string( "x", "y", colour = colour_by ), alpha = 0.5 ) 
+  }
+  wheel_plot = wheel_plot + ggtitle( fig_name )
+  if( !is.null( colour_by )  && is.numeric( cell_positions[[colour_by]] ) ){
+    wheel_plot = wheel_plot + scale_color_gradientn( colours = blue_gray_red )
+  }
+  if ( !is.null( facet_by ) ){
+      wheel_plot = wheel_plot + facet_wrap( as.formula( paste( "~", facet_by ) ) )  
+  }
+  
+  # # Save & return
+  cat( "Done. Saving and returning plot.\n" )
+  ggsave( filename = file.path( results_path, paste0( fig_name, ".pdf" ) ),
+          plot = wheel_plot,
+          width = 12, height = 10)
+  return( wheel_plot )
+}
+```
+
+
+#### Fractional identity computation
+
+This chunk follows the quadratic programming approach outlined in the Treutlein group's liver bud paper.
+If $Y$ is a cell (num genes by 1) and $X$ is a set of pseudo-bulk data (num genes by num days), then the fractional
+identities are defined as the $C$ (num days by 1) that minimizes $|| Y - XC ||_2^2$ subject to the constraints
+$C>0$ and $\sum_{i=1}^\text{n days}(C_i) = 1$. 
+
+The `quadprog` package minimizes functions of the form $f(b) = -d^Tb + 0.5*b^TDb$. Below, I convert to this form,
+using $\propto$ to mean "has the same argmin". For our objective,
+
+$$
+\begin{aligned}
+|| Y - XC ||_2^2 & \propto  (Y - XC)^T(Y - XC) \\
+  & \propto Y^TY - 2Y^TXC + C^TX^TXC \\
+  & \propto      - 2Y^TXC + C^TX^TXC \\
+  & \propto      - Y^TXC + 0.5*C^TX^TXC \\
+  & \propto      - \underbrace{Y^TX}_{d^T}\underbrace{C}_b + 0.5*C^T\underbrace{X^TX}_DC \\
+\end{aligned}
+$$
+
+This means $d = X^TY$ and $D=X^TX$.
+
+It (`quadprog`) allows constraints of the form $A^Tb (=,\geq) b_0$ (there is a mechanism to specify which constraints
+are $=$ and which are $\geq$). To represent the unit-sum constraint, $A^T$ has a row of ones and $b_0$ has a $1$ for its
+top row. For the positivity constraint, $A^T$ has an identity block and $b_0$ a block of zeroes, both of size n_days. That 
+means $A$ looks like this (example shows four pseudo-bulk datasets).
+
+$$
+A = \left[
+\begin{array}{ccccc}
+1 & 1 & 0 & 0 & 0\\
+1 & 0 & 1 & 0 & 0\\
+1 & 0 & 0 & 1 & 0\\
+1 & 0 & 0 & 0 & 1\\
+\end{array}
+\right]
+$$
+
+To specify one equality constraint followed by inequality constraints, I set `meq=1`.
+
+```{r}
+
+#' Compute fractional identities single cell
+#'
+get_frac_ident = function( ftoc_cell, pseudo_bulk ){
+  num_pseudo_bulk_datasets = ncol(pseudo_bulk)
+  quadprog::solve.QP( Dmat = t(pseudo_bulk) %*% pseudo_bulk,
+                      dvec = t(pseudo_bulk) %*% ftoc_cell, 
+                      Amat = cbind( rep(1, num_pseudo_bulk_datasets), diag(num_pseudo_bulk_datasets) ),
+                      bvec = c(1,                                   rep(0, num_pseudo_bulk_datasets) ), 
+                      meq = 1, 
+                      factorized = FALSE ) $ solution
+}
+
+
+```
+
+### Receptor-ligand screening and cell surface receptor search
+
+This function takes an array `is_expressed` with cell types in the colnames, genes in the rownames, and boolean values indicated whether than cell type expresses that gene. It saves results from cross-referencing the expression data with
+a list of receptor-ligand pairs.
+
+```{r}
+screen_receptor_ligand = function( is_expressed, results_path ){
+  
+  # # Get receptor-ligand pairs; annotate with tissues expressed; save
+  ramilowski = get_ramilowski()
+  ramilowski$Ligand.ApprovedSymbol = NULL
+  ramilowski$Receptor.ApprovedSymbol = NULL
+  ramilowski = subset( ramilowski, ligand_mouse %in% rownames(is_expressed) )
+  ramilowski = subset( ramilowski, receptor_mouse %in% rownames(is_expressed) )
+  ramilowski$ligand_cell_types = 
+    is_expressed[ramilowski$ligand_mouse, ] %>% 
+    apply( 1, which ) %>% 
+    sapply( names ) %>% 
+    sapply( paste, collapse = "_")
+  ramilowski$receptor_cell_types = 
+    is_expressed[ramilowski$receptor_mouse, ] %>% 
+    apply( 1, which ) %>% 
+    sapply( names ) %>% 
+    sapply( paste, collapse = "_")
+  write.table( ramilowski, file =  file.path( results_path, "Receptor_ligand_all.txt" ), 
+               sep = "\t", row.names = F, col.names = T, quote = F )
+
+  absent = union( ramilowski$ligand_mouse, ramilowski$receptor_mouse ) %>% setdiff( rownames( is_expressed ) )
+  if( length( absent ) > 0 ){
+    zeropad = matrix(F, ncol = is_expressed, nrow = length( absent ), 
+                     dimnames = list( gene = absent, 
+                                      celltype = colnames(is_expressed)) )
+    is_expressed %<>% rbind( zeropad )
+  }
+  
+  # # Get lists of receptors and ligands for each tissue pairing
+  num_unique_ligands = matrix( 0, nrow = 3, ncol = 3, 
+                               dimnames = list( lig_expr_tissue = c("BLD", "MES", "TEC"),
+                                                rec_expr_tissue = c("BLD", "MES", "TEC") ) )
+  dir.create.nice( file.path( results_path, "ligand_lists" ) )
+  dir.create.nice( file.path( results_path, "receptor_lists" ) )
+  for( lig_tissue in rownames(num_unique_ligands)){
+    for( rec_tissue in colnames(num_unique_ligands)){
+      eligible_subset = subset( ramilowski, 
+                                is_expressed[ligand_mouse,   lig_tissue] & 
+                                  is_expressed[receptor_mouse, rec_tissue] )
+      num_unique_ligands[lig_tissue, rec_tissue] = length( unique( eligible_subset$ligand_mouse ) )
+      write.table( unique(eligible_subset$ligand_mouse  ), row.names = F, col.names = F, quote = F,
+                   paste0( results_path, "/ligand_lists/"  , lig_tissue, "_to_", rec_tissue, ".txt") )
+      write.table( unique(eligible_subset$receptor_mouse), row.names = F, col.names = F, quote = F,
+                   paste0( results_path, "/receptor_lists/", lig_tissue, "_to_", rec_tissue, ".txt") )
+      
+    }  
+  }
+  
+  # Background lists composed of everything that got successfully converted to mouse ortholog
+  # For pathway analysis with a background list
+  ramilowski_orig = read.table( file.path( PATH_TO_TABLES, "LigandReceptor_Ramilowski2015_mouse.txt" ), 
+                                header = T, sep="\t", stringsAsFactors = F )
+  write.table( ramilowski_orig$ligand_mouse   %>% unique, 
+               paste0( results_path, "/ligand_lists/background.txt"),
+               row.names = F, col.names = F, quote = F)
+  write.table( ramilowski_orig$receptor_mouse %>% unique, 
+               paste0( results_path, "/receptor_lists/background.txt"),
+               row.names = F, col.names = F, quote = F)
+  
+  
+  # # Save summary to file
+  # # Sink helps get the full dimnames
+  sink( file.path( results_path, "num_unique_ligands.txt" ) )
+  {
+    print( num_unique_ligands )
+  }
+  sink()
+  return()
+}
+```

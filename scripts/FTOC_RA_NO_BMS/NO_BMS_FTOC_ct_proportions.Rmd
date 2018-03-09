@@ -1,0 +1,147 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+## FTOC versus *in vivo* data
+
+Watch out -- this script takes a lot of memory.
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+dge_ftoc = inventory_get( tag = "FTOC_RA_all_dge" ) %>% readRDS
+dge_ftoc %<>% add_maehrlab_metadata( "eday" )
+dge_ftoc %<>% add_maehrlab_metadata( "perturbation" )
+
+
+# # Label TECs and blood via atlas
+dge_atlas = inventory_get( tag = "overview_clean_labeled" ) %>% readRDS
+cell_types = levels(dge_atlas %>% FetchData("ident") %>% extract2(1))
+dge_ftoc = knn_classifier( dge_train = dge_atlas, dge_test = dge_ftoc, 
+                           ident.use = "ident",
+                           vars.all = NULL, my_transform = "PCA_20", 
+                           k = 25, reject_prop = 0.0 )
+
+
+# # Project FTOC cells onto Atlas tSNE to visualize differences in composition
+plot_vars = c("tSNE_1", "tSNE_2", "perturbation", "eday", "orig.ident")
+dge_ftoc = ProjectCells( dge_train = dge_atlas, 
+                         dge_test = dge_ftoc,
+                         to_project = c("tSNE_1", "tSNE_2") )
+plot_df = dge_ftoc %>% FetchData(plot_vars) 
+dge_atlas@data.info$perturbation = "ATLAS"
+plot_df_atlas = ProjectCells( dge_train = dge_atlas, 
+                              dge_test = dge_atlas,
+                              to_project = c("tSNE_1", "tSNE_2") ) %>% FetchData(plot_vars)
+plot_df_atlas$perturbation = NULL
+plot_df$replicate = with(plot_df, 
+                         ave(as.character(orig.ident), 
+                             interaction(eday,perturbation),
+                             FUN = replace_with_int_rank ))
+ggplot(plot_df) + 
+  geom_point(data = plot_df_atlas, aes(x = tSNE_1, y = tSNE_2), colour = "grey", alpha = 0.2) + 
+  geom_point(data = plot_df,       aes(x = tSNE_1, y = tSNE_2, colour = perturbation)) + 
+  facet_grid( ~perturbation ) +
+  scale_colour_manual(values = c(colorRampPalette(c("blue", "green"))(3))) + 
+  theme(legend.position = "none") -> p
+
+ggsave(file.path(results_path, "projected_tSNE.pdf"), p, height = 7, width = 10)
+rm(dge_atlas)
+
+# This will sit in @data.info and mask the actual tSNE even if you re-run the tSNE, so I need to remove it.
+dge_ftoc@data.info$tSNE_1 = NULL
+dge_ftoc@data.info$tSNE_2 = NULL
+
+#### Check main compartments
+props = aggregate_nice(FetchData(dge_ftoc, paste0("classifier_probs_", cell_types)), 
+                       FetchData(dge_ftoc, "orig.ident"), FUN = mean )
+props %<>% as.data.frame
+props$sample = rownames(props)
+metadata = get_metadata(); rownames(metadata) = metadata$Sample_ID
+props$perturbation = metadata[props$sample, "perturbation"]
+props$classifier_probs_TEC = props[paste0("classifier_probs_TEC", 1:3)] %>% rowSums
+overall_TEC_prop = props$classifier_probs_TEC
+names(overall_TEC_prop) = rownames(props)
+props[paste0("classifier_probs_TEC", 1:3)] = NULL
+props_long = melt(props, id.vars = c("sample", "perturbation"))
+props_long$cell_type = props_long$variable %>% sapply(substr, 18, 100)
+
+p = ggplot(props_long) + geom_point(aes(y = value*100, x = perturbation)) + 
+  facet_wrap(~cell_type, scales = "free") + 
+  expand_limits(y=0) + ylab("Percentage") 
+ggsave(file.path( results_path, "ftoc_subpop_percentages.pdf" ), p, width = 7, height = 6)
+
+
+```
+
+#### Check TEC compartment sizes
+
+```{r}
+dge_ftoc_tec = inventory_get( tag = "dge_ftoc_ra_ctrl_bms_tec" )
+
+dge_atlas_TEC = inventory_get( tag = "whole_plus_sorted_16_bag_labeled" ) %>% readRDS
+cell_types = levels(dge_atlas_TEC %>% FetchData("cell_type") %>% extract2(1))
+
+dge_ftoc_tec = knn_classifier( dge_train = dge_atlas_TEC, 
+                               dge_test = dge_ftoc_tec, 
+                               ident.use = "cell_type",
+                               vars.all = NULL, my_transform = "PCA_20", 
+                               k = 25, reject_prop = 0.00 )
+# Proportions within the TEC compartment
+props_within_TEC = aggregate_nice(FetchData(dge_ftoc_tec, paste0("classifier_probs_", cell_types)), 
+                                  FetchData(dge_ftoc_tec, "orig.ident"), FUN = mean )
+# Account for the overall growth of the TEC compartment
+props = diag(overall_TEC_prop) %*% props_within_TEC
+rownames(props) = rownames(props_within_TEC)
+assertthat::are_equal( props["FTOC_RA_rep3", 1], 
+                       overall_TEC_prop["FTOC_RA_rep3"]*props_within_TEC["FTOC_RA_rep3", 1] )
+props %<>% as.data.frame
+props$sample = rownames(props)
+metadata = get_metadata(); rownames(metadata) = metadata$Sample_ID
+props$perturbation = metadata[props$sample, "perturbation"]
+props_long = melt(props, id.vars = c("sample", "perturbation"))
+props_long$cell_type = props_long$variable %>% sapply(substr, 18, 100)
+
+p = ggplot(props_long) + geom_point(aes(y = value*100, x = perturbation)) + 
+  facet_wrap(~cell_type, scales = "free") + 
+  expand_limits(y=0) + ylab("Percentage") 
+ggsave(file.path( results_path, "ftoc_TEC_subpop_percentages.pdf" ), p, width = 7, height = 6)
+
+
+parse_lmp = function(lmp_out) lmp_out %>% summary %>% extract2("coefficients") %>% extract(2, 2)
+test_props = function( X ){
+  p = lmPerm::lmp(data = X, formula = value~perturbation) %>% parse_lmp
+  model = "full"
+  return(list(p=p, model=model))
+}
+
+test_out = as.list(cell_types); names(test_out) = cell_types
+for(ct in cell_types){
+  test_out[[ct]] = test_props(subset(props_long, cell_type == ct))
+}
+test_out_parsed = data.frame(row.names=names(test_out),
+                             pvals = test_out %>% sapply(extract2, "p"), 
+                             qvals = test_out %>% sapply(extract2, "p") %>% p.adjust, 
+                             model = test_out %>% sapply(extract2, "model"))
+test_out_parsed$pvals %<>% round(3)
+test_out_parsed$qvals %<>% round(3)
+write.table(test_out_parsed, file.path(results_path, "FTOC_TEC_subpop_ratio_tests.txt"), quote = F)
+```
+
+#### NKT compartment sizes
+
+```{r}
+
+cellprop_NKT = CompareCellProps( dge_test = SubsetDataFlex(dge_ftoc, 
+                                                           "classifier_ident", 
+                                                           "classifier_ident %in% paste0('BLD', 5)"), 
+                                 dge_train = inventory_get( tag = "NKT_atlas_with_tcr" ) %>% readRDS,
+                                 ident.use = "cell_type", 
+                                 treatment_var = "perturbation")
+ggsave( file.path( results_path, "ct_props_NKT.pdf"), cellprop_NKT$plot )
+write.table( cellprop_NKT$test_results,  file.path( results_path, "ct_props_NKT_testing.txt"))
+```
+

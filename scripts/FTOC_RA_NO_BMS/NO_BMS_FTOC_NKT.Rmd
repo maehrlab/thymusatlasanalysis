@@ -1,0 +1,269 @@
+
+#### Delineate NKT subsets/comparisons of interest
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+dge_ftoc_nkt = inventory_get( tag = "FTOC_RA_all_dge" ) %>% readRDS %>% 
+  SubsetDataFlex(vars.use = "classifier_ident", "classifier_ident %in% c('NKT','BLD5')")
+dge_ftoc_nkt %<>% add_tcr
+	
+all_params = expand.grid( cc_method = c( "average" ),
+                          excess_var_cutoff = c( 1 ),
+                          log_expr_cutoff = c( 0.1 ), 
+                          prop_genes_to_select = NA, 
+                          num_genes_to_select = NA, 
+                          var_gene_method = "seurat",
+                          num_pc =  15, 
+                          clust_method = "SNN",
+                          clust_granularities_as_string = "0.5",
+                          plot_all_var_genes = F,
+                          stringsAsFactors = F)
+dge_ftoc_nkt %<>% explore_embeddings( results_path, all_params)
+
+dge_ftoc_nkt = knn_classifier(dge_train = inventory_get("NKT_atlas_with_tcr_cl_bag") %>% readRDS, 
+                              dge_test = dge_ftoc_nkt )
+
+save_feature_plots( dge_ftoc_nkt, results_path, 
+                    gene_list_name = "nct_genes",
+                    gene_list = c("Rag1", "Rag2", "Tnfsf11", "Ltb", "Ccr7", "Il7r", "Il22", get_nkt_genes()))
+save_feature_plots( dge_ftoc_nkt, results_path, 
+                    gene_list_name = "metadata",
+                    gene_list = "perturbation", cols.use = RA_FTOC_colors)
+
+save_feature_plots( dge_ftoc_nkt, results_path, 
+                    gene_list_name = "metadata",
+                    gene_list = c("classifier_ident", "classifier_badness"))
+VlnPlot(dge_ftoc_nkt, "classifier_badness", group.by = "ident")
+save_feature_plots( dge_ftoc_nkt, results_path, 
+                    gene_list_name = "metadata",
+                    gene_list = "ident")
+
+```
+
+
+#### Labeling NKT versus LTI
+
+```{r}
+
+# Set up categories
+dge_ftoc_nkt %>% custom_feature_plot("ident")
+dge_ftoc_nkt %>% custom_feature_plot("perturbation")
+X = dge_ftoc_nkt %>% FetchData(c("ident", "perturbation"))
+converter = c("0" = "ILC_a", 
+              "2" = "ILC_a", 
+              "3" = "ILC_d", 
+              "4" = "ILC_c", 
+              "5" = "ILC_b")
+X$major_celltype = converter[X$ident]
+dge_ftoc_nkt %<>% AddMetaData(X["major_celltype"])
+dge_ftoc_nkt %>% custom_feature_plot("major_celltype")
+save_feature_plots( dge_ftoc_nkt, results_path, 
+                    gene_list_name = "metadata",
+                    gene_list = "major_celltype", cols.use = NKT_LTI_COLS)
+
+dge_nkt_path = file.path(results_path, "ftoc_nkt_dge.data")
+inventory_add( tag = "dge_ftoc_nkt", filename = dge_nkt_path, force = T )
+saveRDS(dge_ftoc_nkt, dge_nkt_path)
+# dge_ftoc_nkt = inventory_get( tag = "dge_ftoc_nkt") %>% readRDS
+
+```
+
+#### Small heatmap with known markers
+
+```{r}
+dco =  c( "ILC_a", "ILC_b", "ILC_c", "ILC_d" )
+genes_exclude = c("TRB_TOTAL", "TRA_TOTAL")
+genes_small_heatmap = union(get_nkt_genes(), get_LTi_genes() ) %>% setdiff(genes_exclude)
+genes_aggregated = make_heatmap_for_table( dge_ftoc_nkt %>% 
+                                             SubsetDataFlex(vars.use = "major_celltype", "major_celltype!='LTi'"), 
+                                           ident.use = "major_celltype",
+                                           desired_cluster_order = dco,
+                                           genes_in_order = genes_small_heatmap, 
+                                           return_type = "table" )
+genes_small_heatmap = OrderRowsForHeatmap(genes_aggregated)
+
+
+p =  make_heatmap_for_table( dge_ftoc_nkt %>% 
+                               SubsetDataFlex(vars.use = "major_celltype", "major_celltype!='LTi'"), 
+                             ident.use = "major_celltype",
+                             desired_cluster_order = dco,
+                             genes_in_order = genes_small_heatmap, 
+                             labels = "stagger")
+ggsave(file.path(results_path, "NKT_vs_LTi_heatmap_handpicked.pdf"), p, height = 8)
+
+
+```
+
+#### Find and display perturbation effects within NKT1
+
+```{r}
+THRESHOLD = 0.5
+
+de_NKT1_RA = FindMarkersFlex( object = dge_ftoc_nkt %>% SubsetDataFlex( "major_celltype", " major_celltype=='NKT_1' " ), 
+                              ident.use = "perturbation",
+                              ident.1 = "RA", 
+                              ident.2 = "CTRL", thresh.use = THRESHOLD )
+de_NKT1_BMS = FindMarkersFlex( object = dge_ftoc_nkt %>% SubsetDataFlex( "major_celltype", " major_celltype=='NKT_1' " ), 
+                              ident.use = "perturbation",
+                              ident.1 = "BMS", 
+                              ident.2 = "CTRL", thresh.use = THRESHOLD )
+
+de_NKT1_top = Reduce(list( de_NKT1_BMS$gene %>% head(10), 
+                           de_NKT1_RA$gene  %>% tail(10),
+                           de_NKT1_BMS$gene %>% tail(10),
+                           de_NKT1_RA$gene  %>% head(10) ), f=union)
+genes_aggregated = make_heatmap_for_table( dge_ftoc_nkt %>% SubsetDataFlex("major_celltype", " major_celltype=='NKT_1' "), 
+                                           ident.use = "perturbation",
+                                           desired_cluster_order = c( "BMS","CTRL", "RA" ),
+                                           genes_in_order = de_NKT1_top, 
+                                           return_type = "table" )
+de_NKT1_top = OrderRowsForHeatmap(genes_aggregated)
+p_heat_NKT1 = make_heatmap_for_table( dge_ftoc_nkt %>% SubsetDataFlex("major_celltype", " major_celltype=='NKT_1' "), 
+                                      ident.use = "perturbation",
+                                      desired_cluster_order = c( "BMS","CTRL", "RA" ),
+                                      genes_in_order = de_NKT1_top, 
+                                      labels = "all")
+ggsave(file.path(results_path, "NKT1_perturbation_heatmap.pdf"), p_heat_NKT1)
+
+```
+
+#### Find and display perturbation effects within LTi
+
+```{r}
+
+de_LTi_RA = FindMarkersFlex( object = dge_ftoc_nkt %>% SubsetDataFlex( "major_celltype", " major_celltype=='LTi' " ), 
+                              ident.use = "perturbation",
+                              ident.1 = "RA", 
+                              ident.2 = "CTRL", thresh.use = THRESHOLD )
+de_LTi_BMS = FindMarkersFlex( object = dge_ftoc_nkt %>% SubsetDataFlex( "major_celltype", " major_celltype=='LTi' " ), 
+                              ident.use = "perturbation",
+                              ident.1 = "BMS", 
+                              ident.2 = "CTRL", thresh.use = THRESHOLD )
+de_LTi_top = Reduce(list( "Rorc", 
+                          de_LTi_BMS$gene %>% head(10), 
+                          de_LTi_RA$gene  %>% tail(10),
+                          de_LTi_BMS$gene %>% tail(10),
+                          de_LTi_RA$gene  %>% head(10) ), f=union)
+
+genes_aggregated = make_heatmap_for_table( dge_ftoc_nkt %>% SubsetDataFlex("major_celltype", " major_celltype=='LTi' "), 
+                                           ident.use = "perturbation",
+                                           desired_cluster_order = c( "BMS","CTRL", "RA" ),
+                                           genes_in_order = de_LTi_top, 
+                                           return_type = "table" )
+de_LTi_top = OrderRowsForHeatmap(genes_aggregated)
+p_heat_LTi = make_heatmap_for_table( dge_ftoc_nkt %>% SubsetDataFlex("major_celltype", " major_celltype=='LTi' "), 
+                            ident.use = "perturbation",
+                            desired_cluster_order = c( "BMS","CTRL", "RA" ),
+                            genes_in_order = de_LTi_top, 
+                            labels = "all")
+ggsave(file.path(results_path, "LTi_perturbation_heatmap.pdf"), p_heat_LTi)
+
+```
+
+#### Put the atlas on the LTi and NKT heatmaps
+
+```{r}
+nkt_lti_ftoc_atlas =
+  inventory_get(tag="overview_clean_labeled") %>% readRDS %>% 
+  SubsetDataFlex("ident", " ident=='BLD5' ") %>%
+  SubsetDataFlex("eday", " eday %in% c(15.5, 16.5) ") %>%
+  SeuratMerge( dge_ftoc_nkt )
+
+nkt_lti_ftoc_atlas %<>% add_maehrlab_metadata("perturbation")
+nkt_lti_ftoc_atlas %<>% add_maehrlab_metadata("source_tissue")
+nkt_lti_ftoc_atlas@var.genes = dge_ftoc_nkt@var.genes
+nkt_lti_ftoc_atlas %<>% PCAFast(pcs.compute = 25)
+nkt_lti_ftoc_atlas %<>% RunTSNE(do.fast = T)
+nkt_lti_ftoc_atlas = knn_classifier(dge_test = nkt_lti_ftoc_atlas, 
+                                    dge_train = dge_ftoc_nkt, 
+                                    ident.use = "major_celltype", 
+                                    vars.all = genes_small_heatmap )
+nkt_lti_ftoc_atlas@data.info$origin = nkt_lti_ftoc_atlas@data.info$perturbation %>% as.character
+index_vivo = nkt_lti_ftoc_atlas@data.info$source_tissue=="embryo"
+nkt_lti_ftoc_atlas@data.info$origin[index_vivo] = "atlas"
+nkt_lti_ftoc_atlas@data.info$origin %>% table
+custom_feature_plot(nkt_lti_ftoc_atlas, "origin")
+custom_feature_plot(nkt_lti_ftoc_atlas, "source_tissue")
+custom_feature_plot(nkt_lti_ftoc_atlas, "perturbation")
+custom_feature_plot(nkt_lti_ftoc_atlas, "classifier_ident")
+nkt_lti_ftoc_atlas %>% FetchData(c("classifier_ident", "origin")) %>% table
+
+p_heat_NKT1_atlas = make_heatmap_for_table( nkt_lti_ftoc_atlas %>% 
+                                              SubsetDataFlex("classifier_ident", " classifier_ident=='NKT_1' "), 
+                                            ident.use = "origin",
+                                            desired_cluster_order = c( "BMS", "CTRL", "RA", "15.5", "16.5" ),
+                                            genes_in_order = de_NKT1_top, 
+                                            labels = "all")
+ggsave(file.path(results_path, "NKT1_perturbation_heatmap_with_atlas.pdf"), p_heat_NKT1_atlas)
+
+p_heat_LTi_atlas = make_heatmap_for_table( nkt_lti_ftoc_atlas %>% 
+                                             SubsetDataFlex("classifier_ident", " classifier_ident=='LTi' "), 
+                                           ident.use = "origin",
+                                           desired_cluster_order = c( "BMS", "CTRL", "RA", "atlas" ),
+                                           genes_in_order = de_LTi_top, 
+                                           labels = "all")
+ggsave(file.path(results_path, "LTi_perturbation_heatmap_with_atlas.pdf"), p_heat_LTi_atlas)
+
+```
+
+#### Find and display markers for clusters of interest
+
+```{r}
+# dge_ftoc_nkt %<>% SetIdent(ident.use = FetchData(dge_ftoc_nkt, "major_celltype") %>% extract2(1), 
+#                            cells.use = FetchData(dge_ftoc_nkt, "major_celltype") %>% rownames )
+# de_genes = FindAllMarkers( object = dge_ftoc_nkt )
+# 
+# fix_genes = function( genes ){
+#   ifelse( genes %in% AvailableData(dge_ftoc_nkt), 
+#           genes, 
+#           substr(genes, 1, sapply(genes, nchar) - 1))
+# } 
+# de_genes$gene = rownames(de_genes) %>% fix_genes
+# de_genes$p.value = de_genes$p_val
+# de_genes$q.value = de_genes$p.value %>% p.adjust
+# de_genes = de_genes[de_genes$avg_diff %>% order(decreasing = T), ]
+# write.table( de_genes, file.path( results_path, "ftoc_nkt_markers.txt" ) )
+# de_genes_bak = de_genes
+# 
+# 
+# dco = c( "LTi",
+#          "NKT_17",
+#          "NKT_2",
+#          "NKT_1")
+# genes_to_heatmap = c()
+# for(ct in dco){
+#   genes_to_heatmap %<>% union( de_genes %>% subset( cluster == ct, select = "gene", drop = T ) %>% extract(1:10)  )
+# }
+# genes_aggregated = make_heatmap_for_table( dge_ftoc_nkt, 
+#                                            ident.use = "major_celltype",
+#                                            desired_cluster_order = dco,
+#                                            genes_in_order = genes_to_heatmap, 
+#                                            return_type = "table" )
+# genes_to_heatmap = genes_to_heatmap[hclust( dist(genes_aggregated) )[["order"]]]
+# genes_to_heatmap[20:49] %<>% rev
+# genes_to_heatmap[30:49] %<>% rev
+# genes_to_heatmap[c(30,20)] %<>% rev
+# genes_to_heatmap[10:18] %<>% rev
+# p =  make_heatmap_for_table( dge_ftoc_nkt, 
+#                              ident.use = "major_celltype",
+#                              desired_cluster_order = dco,
+#                              genes_in_order = genes_to_heatmap)
+# ggsave(file.path(results_path, "NKT_1_heatmap.pdf"), p)
+```
+
+
+#### TACS
+
+```{r}
+# TACS_info_atlas_control_nkt = 
+#   inventory_get("dge_atlas_plus_ctrl_ftoc") %>% readRDS %>% 
+#   SubsetDataFlex("cell_type", "cell_type %in% paste0('BLD', 5)") %>% 
+#   TACS(gene1 = ???, gene2 = ???, facet_by = "edayXsetting", return_val = "all")
+# g1_set = TACS_info_atlas_control_nkt$genesets[[1]]
+# g2_set = TACS_info_atlas_control_nkt$genesets[[2]]
+# p_TACS_nkt = dge_ftoc_nkt %>% 
+#   TACS(gene1 = g1_set, gene2 = g2_set, facet_by = "perturbation", genesets_predetermined = T)
+# ggsave(file.path(results_path, "p_TACS_nkt.pdf"), p_TACS_nkt, width = 7, height = 3.5)
+
+```

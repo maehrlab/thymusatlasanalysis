@@ -1,0 +1,290 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+#### Setup
+
+Get data; subset thymocytes; merge realigned TCR counts
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )  
+dge = freezr::inventory_get( tag = "overview_clean_labeled" ) %>% readRDS
+
+eligible_subsets = paste0('BLD', 1:3) %>% union(c("C2", "C4", "C5"))
+inclusion_colorscale = rep( "grey", length(fig1_cols) )
+names( inclusion_colorscale ) =  names(fig1_cols)
+inclusion_colorscale[eligible_subsets] = "grey30"
+tsne_colored(dge, results_path, colour = "ident", cols.use = inclusion_colorscale )
+
+dge %<>% SubsetDataFlex( "ident", " ident %in% eligible_subsets ", 
+                         show_on_tsne = T, results_path = results_path,
+                         cols.use = c("grey", "grey30") ); gc()
+
+dge %<>% add_tcr
+dge@data.info$TRA_plus_TRB = dge %>% FetchData(c("TRA_TOTAL", "TRB_TOTAL") ) %>% rowSums
+```
+
+Run exploratory pipeline; remove doublets; re-run pipeline
+ 
+```{r}
+all_params = expand.grid( cc_method = c( "average" ),
+                          excess_var_cutoff = c( 0.5 ),
+                          log_expr_cutoff = c( 0.10 ), 
+                          num_pc = c( 25 ), 
+                          clust_method = "SNN",
+                          clust_granularities_as_string = "0.5",
+                          plot_all_var_genes = F,
+                          stringsAsFactors = F )
+dge %<>% explore_embeddings( file.path(results_path, "initial"), all_params[1, ])
+tsne_colored(dge, results_path, "Psmb11", fig_name = "Psmb11_with_dubs")
+dge %<>% DBClustDimension(G.use = 5)
+tsne_colored(dge, results_path, "ident")
+dge %<>% SubsetDataFlex("ident", "ident != 3")
+tsne_colored(dge, results_path, "Psmb11", fig_name = "Psmb11_no_dubs")
+current_rp = file.path(results_path, "nodub")
+dge %<>% explore_embeddings( current_rp, all_params[1, ])
+
+# Relabel clusters and save to inventory
+dge@data.info$cell_type = c( "0"= "ConvT3" ,
+                             "2"= "ConvT5" ,
+                             "3"= "ConvT1" ,
+                             "4"= "ConvT2" ,
+                             "5"= "ConvT4" )[dge@ident %>% as.character] %>% as.factor
+dge_path = file.path(results_path, 
+                     "nodub",
+                     collapse_by_name( all_params[1, ]),
+                     "dge.data" )
+dir.create.nice(dirname(dge_path))
+saveRDS( dge, dge_path )
+inventory_add( inv_location = results_path, 
+               tag = "Tcell_nodub", 
+               force = T,
+               filename = dge_path )
+# dge = inventory_get("Tcell_nodub") %>% readRDS
+
+```
+
+
+#### Marker testing
+
+```{r}
+cell_types = FetchData(dge, "cell_type")[[1]] %>% unique %>% as.character %>% sort
+de_gene_tables = mapply( FindMarkersFlex,
+                         ident.1 = cell_types,  
+                         SIMPLIFY = F,
+                         MoreArgs = list(object = dge, # %>% SubsetData(max.cells.per.ident = 20), 
+                                         ident.use = "cell_type" ) )
+names( de_gene_tables ) = cell_types
+for( cell_type in cell_types ){
+  de_gene_tables[[cell_type]]$cluster = cell_type
+}
+de_gene_tables %<>% lapply( subset, q.value <= 0.01 )
+de_gene_tables %<>% lapply( tidy_marker_table )
+SaveMarkerTables( de_gene_tables , results_path  = current_rp, filter_name = "fdr0_01", filter_predicate = "TRUE" )
+write.table( Reduce(rbind, de_gene_tables),
+             file.path(current_rp, "all_markers.tsv"),
+             quote = F, row.names = F, col.names = T, sep = "\t")
+```
+
+#### Heatmaps
+
+```{r}
+thymocyte_maturation_markers = c( 
+  # Suppressed immediately in ETP's
+  "Flt3",  "Csf1r", "Ccr9",
+  
+  # Characteristic of DN1
+  "Gfi1b", "Spi1", "Lyl1",  "Tal1", "Cd44", "Kit",
+  
+  # Early T-cell genes
+  "Runx2","Bcl11a", 
+  "Il2ra",  "Il7r", "Sell", "Ptcra",
+  
+  # Notch pathway genes
+  "Dtx1", "Hes1", "Notch1", "Notch3",
+  
+  # TFs signaling T-cell commitment
+  "Ets1", "Lef1", "Spib", "Cd27",
+  "Tcf12","Tcf7","Thy1","Bcl11b", 
+  
+  # Rearrangement machinery
+  "Rag1", "Rag2", "Dntt", "Prkdc","Dclre1c","Lig4", 
+  
+  # TCR signaling kinases
+  "Lck", "Zap70", "Lcp2", 
+  
+  # Receptor subunits
+  "Cd3g", "Cd3e", "Cd3d", "Cd247", "Il2rg",
+  "TRA_TOTAL", "TRB_TOTAL", "Cd8a", "Cd8b", "Cd4",
+  
+  # Blunts effector capacity in DP's
+  "Rorc",
+  
+  #Other
+  "Gzmb", "Cd163l1",
+  
+  # Cd4 versus Cd8
+  "Zbtb7b", "Runx3" )
+
+dgo = make_heatmap_for_table( dge = dge, 
+                            genes_in_order = thymocyte_maturation_markers,
+                            ident.use = "cell_type", 
+                            labels = "regular", return_type = "table") %>% OrderRowsForHeatmap()
+p = make_heatmap_for_table( dge = dge, 
+                            genes_in_order = dgo,
+                            ident.use = "cell_type", 
+                            labels = "regular")
+dir.create.nice(current_rp)
+ggsave( file.path( current_rp, "heatmap_handpicked.pdf" ), 
+        p + scale_fill_gradientn( colours = blue_gray_red ), height = 10, width = 5 )
+
+p = make_heatmap_for_table( dge = dge, 
+                            genes_in_order = 
+                              de_gene_tables %>% 
+                              lapply(head, 15) %>% 
+                              lapply(extract2, "gene") %>%
+                              Reduce(f = union) %>% 
+                              setdiff(thymocyte_maturation_markers),
+                            ident.use = "cell_type", 
+                            labels = "regular")
+ggsave( file.path( current_rp, "heatmap_data_driven.pdf" ), 
+        p + scale_fill_gradientn( colours = blue_gray_red ), height = 10, width = 5 )
+
+```
+
+#### Save pie charts and featureplots
+
+I do the featureplots last, because saving the whole grid at once is memory-intensive, and I have to delete slots to save on RAM.
+
+```{r}
+dir.create.nice(current_rp)
+ggsave( file.path( current_rp, "pie.pdf" ),
+        SeuratPie( dge ) + facet_wrap(~eday, ncol = 4) )
+
+tsne_colored(dge, results_path = results_path, colour = "eday", cols.use = extended_eday_colors)
+tsne_colored(dge, results_path = results_path, colour = "M")
+tsne_colored(dge, results_path = results_path, colour = "cell_type")
+
+# Delete these to clear up some RAM
+dge@raw.data = matrix()
+dge@scale.data = matrix()
+gc()
+
+grid_markers = c( "Csf1r", "Myb", "Kit", "Cd44", "Notch1",
+                  "Il2ra",  "Ptcra",
+                  "Rag1",  "Rag2",
+                  "Bcl11b", "Tcf7",
+                  "Cd8a", "Cd8b1", 
+                  "Cd4", "TRA_plus_TRB" ) 
+{
+  save_plot_grid( dge, results_path,
+                  gene_list = grid_markers[1:6], 
+                  title_pos   = c(0.15, 0),
+                  size = 0.1,
+                  gene_list_name = "thymocyte_maturation_markers_1", 
+                  ncol = 3, width = 3*3, height = 3*2, 
+                  cols.use = c("khaki1", "red") )
+  
+  save_plot_grid( dge, results_path,
+                  gene_list = grid_markers[(7:12)], 
+                  title_pos   = c(0.15, 0),
+                  size = 0.1,
+                  gene_list_name = "thymocyte_maturation_markers_2", 
+                  ncol = 3, width = 3*3, height = 3*2, 
+                  cols.use = c("khaki1", "red") )
+  
+  save_plot_grid( dge, results_path,
+                  gene_list = grid_markers[(13:15)], 
+                  title_pos   = c(0.15, 0),
+                  size = 0.1,
+                  gene_list_name = "thymocyte_maturation_markers_3", 
+                  ncol = 3, width = 3*3, height = 3,
+                  cols.use = c("khaki1", "red") )
+}
+save_feature_plots( dge, results_path,
+                    gene_list = thymocyte_maturation_markers, 
+                    gene_list_name = "thymocyte_maturation_markers", types = "PDF_no_leg" )
+
+save_feature_plots( dge, results_path,
+                    gene_list = c("Il7r", "Kit", "Flt3", "Lmo2", "Met2c", 
+                                  "Hhex", "Lfng", "Nrarp", "Ets2", "Tcf7", 
+                                  "Lat", "Ccr9", "Satb1", "Runx3", "Tcf12", 
+                                  "Lck", "Notch1", "Runx1", "Ctsc", "Prkcd", 
+                                  "Anxa1", "Myadm", "Laptm4b", "Mpo", "Csf1r"), 
+                    gene_list_name = "etp_markers", types = "PDF_no_leg" )
+ 
+```
+
+#### TACS for DN stages and commitment versus Notch signalling
+
+```{r}
+p = TACS( dge, "Il2ra", "Cd44", cutoffs = c(1, 0.7), 
+          facet_by = "cell_type", density = T, include_panel_with_all = T ) 
+ggsave( file.path( results_path, "TACS_CD25_CD44.pdf" ),
+        p + scale_x_continuous(breaks = 1:2) , 
+        width = 6, height = 4)
+
+p = TACS( dge, "Bcl11b", "Dtx1", cutoffs = c(1, 0.7), 
+          facet_by = "cell_type", density = T, include_panel_with_all = T)
+ggsave( file.path( results_path, "TACS_Bcl11b_Dtx1.pdf" ), 
+        p + scale_x_continuous(breaks = 1:2),
+        width = 6, height = 4)
+
+p = TACS( dge, "Bcl11b", "Dtx1", cutoffs = c(1, 0.7), 
+          facet_by = "eday", density = T, include_panel_with_all = T, 
+          col = extended_eday_colors ) + facet_wrap(~eday, ncol = 3)
+ggsave( file.path( results_path, "TACS_Bcl11b_Dtx1_eday.pdf" ),
+        p + scale_x_continuous(breaks = 1:2) , 
+        width = 6, height = 5)
+
+
+dge_dn_only = dge %>% SubsetDataFlex("cell_type", predicate = "!(cell_type %in% 'ConvT5')")
+tsne_colored(dge_dn_only, results_path, "cell_type",
+             cols.use = scales::hue_pal()(5)[1:4], types = "PNG_PDF_split")
+p = TACS( dge_dn_only, "Il2ra", "Cd44", cutoffs = c(1, 0.7), 
+          facet_by = "eday", density = T, include_panel_with_all = T, 
+          col = extended_eday_colors ) + facet_wrap(~eday, ncol = 9)
+ggsave( file.path( results_path, "TACS_CD25_CD44_eday_no_ConvT5.pdf" ),
+        p + scale_x_continuous(breaks = 1:2) , 
+        width = 10, height = 2.5)
+
+
+p = TACS( dge_dn_only, "Il2ra", "Cd44", cutoffs = c(1, 0.7), 
+          facet_by = "orig.ident", density = T, include_panel_with_all = T )
+```
+
+#### Where does ConvT2 fall on the overview tSNE?
+
+```{r}
+ConvT2_barcodes = dge %>% FetchData("cell_type") %>% subset(cell_type=="ConvT2") %>% rownames
+dge_overview = freezr::inventory_get( tag = "overview_clean_labeled" ) %>% readRDS
+dge_overview@data.info$is_ConvT2 = rownames(dge_overview@data.info) %>% is.element(ConvT2_barcodes) %>% as.character()
+tsne_colored(dge_overview, results_path, "is_ConvT2")
+```
+
+#### Coexpression of Csf1r with T-cell markers
+
+```{r}
+X = dge %>% FetchData(c("Csf1r", "Myb", "Il7r", "Kit"))
+X %<>% apply(2, is_greater_than, 0)  %>% as.data.frame
+aggregate_nice(X[-1], X$Csf1r, FUN = table) 
+
+Y = dge %>% FetchData(c("Csf1r", "Tyrobp", "Srgn", "Plac8"))
+Y %<>% apply(2, is_greater_than, 0)  %>% as.data.frame
+aggregate_nice(Y[-1], Y$Csf1r, FUN = table) 
+
+rm(dge); gc()
+
+dge_atlas = inventory_get("overview_clean_labeled") %>% readRDS
+dge_atlas@raw.data = matrix()
+dge_atlas@scale.data = matrix()
+save_feature_plots(dge_atlas, results_path, gene_list = c("Csf1r", "Tyrobp", "Srgn", "Plac8"), 
+                   gene_list_name = "myeloid_markers")
+save_feature_plots(dge_atlas, results_path, gene_list = c("Myb", "Il7r", "Kit"), 
+                   gene_list_name = "myeloid_markers")
+```
+
+

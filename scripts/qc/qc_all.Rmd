@@ -1,0 +1,40 @@
+---
+title: "Thymus basic analysis"
+author: "Eric Kernfeld"
+date: "September 13, 2016"
+output: html_document
+---
+
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+# # Check to see the data is actually all there
+metadata = thymusatlasdataprivate::get_metadata()
+metadata$file_exists_auto = metadata$dge_path %>% file.exists 
+existence_status_correct = metadata$file_exists_auto == ( metadata$files_available == "yes" )
+if( !all( existence_status_correct ) ){
+  print( "For these samples, the sheet says the files are available but they actually aren't, or vice versa." )
+  print(" By row:" )
+  cat( which( !existence_status_correct ) )
+  print(" By Sample_ID:" )
+  cat( metadata$Sample_ID[ !existence_status_correct ] )
+}
+
+# # Check for duplicate sample ID's and file names
+if( any( duplicated( metadata$Sample_ID ) ) ){
+  print( "You have some duplicate sample IDs.")
+  print( metadata$Sample_ID[ duplicated( metadata$Sample_ID ) ] )
+}
+file_dupes = metadata$raw_data_path[ duplicated( metadata$raw_data_path ) ]
+file_dupes = setdiff( file_dupes, c("") )
+if( !all( file_dupes %in% c("") ) ){
+  print( "You have some duplicate files listed.")
+  print( file_dupes )
+}
+
+# # P for duplicate sample ID's and file names
+save_depth_stats( results_path )
+scatterplot_replicates( results_path )
+check_xist_all( results_path )
+```

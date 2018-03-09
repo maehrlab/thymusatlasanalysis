@@ -1,0 +1,155 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+#### Retrieve data
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+dge_atlas_NKT = inventory_get("NKT_atlas_with_tcr_cl_bag") %>% readRDS
+```
+
+#### Cell cycle scores heatmap
+
+```{r}
+cc_heat = make_heatmap_for_table( dge = dge_atlas_NKT, 
+                        genes_in_order = c( "IG1.S",
+                                            "S", 
+                                            "G2.M", 
+                                            "M",
+                                            "M.G1" ),
+                        normalize = "both", 
+                        norm_fun = standardize,
+                        desired_cluster_order = paste0("NCL", 1:8) ) 
+cc_heat = cc_heat + ylab("Cell cycle score")
+cc_heat = cc_heat + scale_fill_gradient2(low = "white", high = scales::muted("green"))
+ggsave( file.path( results_path, "cc_heatmap_both_norm.pdf"), cc_heat )
+
+cc_heat = make_heatmap_for_table( dge = dge_atlas_NKT, 
+                        genes_in_order = c( "IG1.S",
+                                            "S", 
+                                            "G2.M", 
+                                            "M",
+                                            "M.G1" ),
+                        normalize = "row", 
+                        norm_fun = standardize,
+                        desired_cluster_order = paste0("NCL", 1:8) ) 
+cc_heat = cc_heat + ylab("Cell cycle score")
+cc_heat = cc_heat + scale_fill_gradient2(low = "white", high = scales::muted("green"))
+ggsave( file.path( results_path, "cc_heatmap_row_norm.pdf"), cc_heat )
+```
+
+
+#### Load genes from ImmGen ILC profiling project
+
+```{r}
+
+get_ILC_ImmGen_table = function( my_table, ... ){
+  read.csv(file.path(proj_dir, "tables/ilc_markers", my_table ), stringsAsFactors = F, ...)
+}
+
+dco = paste0("NCL", 1:3)
+
+genes_ImmGen = get_ILC_ImmGen_table("ni.3094-S3_types_alone_and_paired.csv")
+genes_ImmGen_ILC2_LTi = get_ILC_ImmGen_table("ni.3094-S2_ILC2_and_LTi.csv")
+genes_neutrophil = get_ILC_ImmGen_table("neutrophil_highly_expressed.csv", comment.char = "#")[1:150, "Gene.ID"] 
+genes_neutrophil %<>% Capitalize
+genes_Dwyer = get_ILC_ImmGen_table("mast_cells.csv" , header = T, comment.char = "#")
+
+genes_ILC1 = genes_ImmGen$ILC1.genes.uniquely.upregulated.at.least.2.fold.compared.to.ILC2..ILC3..and.LTi.like 
+genes_ILC2 = genes_ImmGen$ILC2.genes.uniquely.upregulated.at.least.2.fold.compared.to.compared.to.ILC1..ILC3..and.LTi.like
+genes_ILC3 = genes_ImmGen$ILC3.genes.uniquely.upregulated.at.least.2.fold.compared.to.compared.to.ILC1..ILC2..and.LTi.like
+genes_LTi = genes_ImmGen_ILC2_LTi$CD4..and.CD4..Lti.like.genes.uniquely.upregulated.at.least.2.fold
+genes_mast = genes_Dwyer[[1]]
+genes_basophil = genes_Dwyer[[3]]
+  
+  
+genes_ILC1 %<>% setdiff("")
+genes_ILC2 %<>% setdiff("")
+genes_ILC3 %<>% setdiff("")
+genes_LTi %<>% setdiff("")
+genes_mast %<>% setdiff("")
+genes_basophil %<>% setdiff("")
+
+genes_ILC1     %<>% extract(!is_rp(genes_ILC1))
+genes_ILC2     %<>% extract(!is_rp(genes_ILC2))
+genes_ILC3     %<>% extract(!is_rp(genes_ILC3))
+genes_LTi      %<>% extract(!is_rp(genes_LTi))
+genes_mast     %<>% extract(!is_rp(genes_mast))
+genes_basophil %<>% extract(!is_rp(genes_basophil))
+
+dge_atlas_NKT %<>% AddMetaData( FetchDataZeroPad(dge_atlas_NKT, genes_ILC1) %>% rowSums, "ImmGen_ILC1_score")
+dge_atlas_NKT %<>% AddMetaData( FetchDataZeroPad(dge_atlas_NKT, genes_ILC2) %>% rowSums, "ImmGen_ILC2_score")
+dge_atlas_NKT %<>% AddMetaData( FetchDataZeroPad(dge_atlas_NKT, genes_ILC3) %>% rowSums, "ImmGen_ILC3_score")
+dge_atlas_NKT %<>% AddMetaData( FetchDataZeroPad(dge_atlas_NKT, genes_LTi) %>% rowSums, "ImmGen_LTi_score")
+dge_atlas_NKT %<>% AddMetaData( FetchDataZeroPad(dge_atlas_NKT, genes_mast) %>% rowSums, "Dwyer_mast_score")
+dge_atlas_NKT %<>% AddMetaData( FetchDataZeroPad(dge_atlas_NKT, genes_basophil) %>% rowSums, "Dwyer_basophil_score")
+dge_atlas_NKT %<>% AddMetaData( FetchDataZeroPad(dge_atlas_NKT, genes_neutrophil) %>% rowSums, "Jiang_neutrophil_score")
+
+
+
+save_plot_grid( dge = dge_atlas_NKT, results_path, 
+                gene_list = c("ImmGen_ILC1_score", "ImmGen_ILC2_score", "ImmGen_ILC3_score", "ImmGen_LTi_score", 
+                              "Klrk1", "Klrb1c", "Klrd1", "Zbtb16",
+                              "Nfil3", "Bcl11b", "Kit", "Tcf7",
+                              "Id2", "Runx1", "Sox4", "Sox13", 
+                              "Cd3e", "Cd3d", "Gzma", "Gzmb",
+                              "TRA_TOTAL", "TRB_TOTAL", "TRG_TOTAL", "TRD_TOTAL"),
+                gene_list_name = "ncl_supp",
+                ncol = 6, 
+                leg_pos = c( -0.3, 0.6 ),
+                title_pos = c( 0.5, 0.9 ),
+                cols.use = c("khaki1", "red"),
+                edit_fun = function(p) p + theme( plot.title = element_text( size = 24 ) ),
+                width = 10, height = 9 )
+
+# 
+# save_plot_grid(dge = dge_atlas_NKT, results_path, 
+#                gene_list = c("Klrk1", "Klrb1c", "Klrd1", "Tbx21",
+#                               "Zbtb16", "Gzma", "Gzmb", "Icos" ),
+#                gene_list_name = "ncl_supp",
+#                ncol = 4, 
+#                leg_pos = c( 0.05, 0.9 ),
+#                title_pos = c( 0.85, 0.9 ),
+#                cols.use = c("khaki1", "red"),
+#                width = 15, height = 10)
+```
+
+
+```{r}
+save_feature_plots(dge_atlas_NKT, results_path, types = "pdf_no_leg",
+                   gene_list = c("ImmGen_ILC1_score", 
+                                 "ImmGen_ILC2_score",
+                                 "ImmGen_ILC3_score", 
+                                 "ImmGen_LTi_score",
+                                 "Jiang_neutrophil_score", 
+                                 "Dwyer_mast_score", 
+                                 "Dwyer_basophil_score"), 
+                   gene_list_name = "ImmGen_scores")
+
+
+save_feature_plots(dge_atlas_NKT, results_path, types = "pdf_no_leg",
+                   gene_list = genes_mast,
+                   gene_list_name = "mast_cell_genes")
+
+save_feature_plots(dge_atlas_NKT, results_path, types = "pdf_no_leg",
+                   gene_list = genes_basophil,
+                   gene_list_name = "basophil_genes")
+
+save_feature_plots(dge_atlas_NKT, results_path, types = "pdf_no_leg",
+                   gene_list = genes_ILC2,
+                   gene_list_name = "ImmGen_ILC2_genes")
+
+save_feature_plots(dge_atlas_NKT, results_path, types = "pdf_no_leg",
+                   gene_list = "eday",
+                   gene_list_name = "metadata", cols.use = extended_eday_colors)
+
+save_feature_plots(dge_atlas_NKT, results_path, types = "pdf_no_leg",
+                   gene_list = c("Rag1", "Rag2"),
+                   gene_list_name = "tcell")
+
+
+```

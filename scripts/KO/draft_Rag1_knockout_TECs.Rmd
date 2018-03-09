@@ -1,0 +1,163 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+#### Retrieve TECs and classify in terms of atlas TEC subclusters
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+dge_rag1_TEC = inventory_get( tag = "dge_rag1_TEC" ) %>% readRDS
+dge_atlas_TEC = inventory_get( tag = "whole_plus_sorted_16_bag_labeled" ) %>% readRDS
+dge_rag1_TEC  = knn_classifier( dge_train = dge_atlas_TEC, 
+                                dge_test = dge_rag1_TEC,
+                                ident.use = "cell_type",
+                                vars.all = NULL, my_transform = "PCA_20",
+                                k = 25, reject_prop = 0.00 )
+dge_rag1_TEC@data.info$cell_type = dge_rag1_TEC@data.info$classifier_ident
+dge_atlas_TEC  = knn_classifier( dge_train = dge_atlas_TEC, 
+                                 dge_test = dge_atlas_TEC,
+                                 ident.use = "cell_type",
+                                 vars.all = NULL, my_transform = "PCA_20",
+                                 k = 25, reject_prop = 0.00 )
+
+cell_types =  FetchData(dge_atlas_TEC, "cell_type")[[1]] %>% as.character %>% unique %>% sort
+classifier_probs_names = paste0("classifier_probs_", cell_types)
+classifier_probs_atlas = dge_atlas_TEC %>% FetchData(c(classifier_probs_names, "eday", "orig.ident")) %>% 
+  subset(eday==16.5, select = c(classifier_probs_names, "orig.ident"))
+classifier_probs_Rag1 =  dge_rag1_TEC %>% FetchData(c(classifier_probs_names, "orig.ident")) 
+props_atlas = aggregate_nice(classifier_probs_atlas[classifier_probs_names], by = classifier_probs_atlas$orig.ident, FUN = mean)
+props_Rag1  = aggregate_nice(classifier_probs_Rag1 [classifier_probs_names], by = classifier_probs_Rag1$orig.ident, FUN = mean)
+
+
+assertthat::are_equal(colnames(props_atlas), colnames(props_Rag1))
+props_all_wide = rbind(props_atlas, props_Rag1 )
+props_all_wide %<>% as.data.frame()
+props_all_wide = cbind(props_all_wide, genotype = rep(c("wt", "Rag1null"), each = 5))
+props_all_wide$reject = NULL
+props_all_wide$orig.ident = rownames(props_all_wide)
+props_all_wide$classifier_probs_cTEC_all = with(props_all_wide, classifier_probs_cTEC_1 + classifier_probs_cTEC_2)
+props_all_wide$classifier_probs_mTEC_all = with(props_all_wide, 
+                                                classifier_probs_mTEC_1 + 
+                                                  classifier_probs_mTEC_2 + 
+                                                  classifier_probs_mTEC_3)
+cell_types = union(cell_types, c("mTEC_all", "cTEC_all"))
+props_all = melt(props_all_wide, id.vars = c("genotype", "orig.ident"))
+props_all$cell_type = sapply(props_all$variable, substr, 18, 100)
+props_all$genotype %<>% factor(levels = c("wt", "Rag1null"), ordered = T)
+
+
+# # Visualize results and quantify strength of evidence
+p = ggplot(props_all) + geom_point(aes(y = value*100, x = genotype)) + 
+  facet_wrap(~cell_type, scales = "free") + 
+  expand_limits(y=0) + ylab("Percentage") 
+ggsave(file.path( results_path, "TEC_subpop_percentages.pdf" ), p, width = 7, height = 6)
+
+
+test_props = function( X ){
+  test_output = nparcomp::npar.t.test(data = X, 
+                                      conf.level = 0.95, alternative = "two.sided", 
+                                      formula = value~genotype,
+                                      method = "permu", nperm = 1e6, 
+                                      info = F)$Analysis$p.value[[1]] 
+  return( test_output ) 
+}
+
+pvals = seq_along(cell_types); names(pvals) = cell_types
+for(ct in cell_types){
+  pvals[ct] = test_props(subset(props_all, cell_type == ct))
+}
+
+{
+  sink( file.path( results_path, "cell_type_proportion_pvals.txt" ) )
+  cat("Raw:\n")
+  print(pvals)
+  cat("FDR adjusted (BH):\n")
+  print(p.adjust(pvals))
+  sink()
+}
+
+```
+
+#### Data merging, and another way to look at the composition
+
+```{r}
+
+
+dge_TEC_all = SeuratMerge( dge_rag1_TEC, dge_atlas_TEC )
+dge_TEC_all = ProjectCells(dge_train = dge_atlas_TEC, 
+                           dge_test = dge_TEC_all,
+                           to_project = paste0("tSNE_", 1:2))
+dge_TEC_all %<>% add_maehrlab_metadata("genotype")
+dge_TEC_all_16 = dge_TEC_all %>% SubsetDataFlex("eday", "eday==16.5") 
+dge_TEC_all_16 %<>% SanitizeGenes
+dge_TEC_all_16 %>% custom_feature_plot("genotype")
+
+# mTEC versus cTEC (mature)
+p = TACS( dge_TEC_all_16, "Prss16", "Aire", facet_by = "genotype", cutoffs  = c(1.5, 0.4)) 
+ggsave(filename = file.path(results_path, "TACS_TECS_Aire_Prss16.pdf"), p)
+# Two different measures of maturity
+p = TACS( dge_TEC_all_16,  "Cd24a", "Epcam", facet_by = "genotype", cutoffs  = c(0.6, 1.4), num_genes_add = 200) 
+ggsave(filename = file.path(results_path, "TACS_TECS_Cd24a_Epcam.pdf"), p)
+# Cell cycle composition
+p = TACS( dge_TEC_all_16,  "M", "IG1.S", facet_by = "genotype", cutoffs  = c(0.5, 0.5), num_genes_add = 0) 
+ggsave(filename = file.path(results_path, "TACS_TECS_M_I.pdf"), p)
+
+```
+
+#### Within-type comparisons
+
+```{r}
+
+test_ct = function(ct){
+  blah = FindMarkersFlex( object = dge_TEC_all %>% 
+                            SubsetDataFlex(c("classifier_ident", "eday"), 
+                                           paste0("eday==16.5 & classifier_ident=='", ct, "'")),
+                          ident.use = "genotype", 
+                          ident.1 = "Rag1null", 
+                          ident.2 = "wt", 
+                          test.use = "binomial_batch" )
+              
+  return(blah)
+}
+
+de_genes_by_ct = cell_types %>% as.list()
+names(de_genes_by_ct) = cell_types
+for(ct in cell_types){
+  de_genes_by_ct[[ct]] = tryCatch( test_ct(ct), error = function(e){NULL})
+}
+de_genes_by_ct_bak = de_genes_by_ct
+
+tidy_marker_table = function (X) 
+{
+    X$`-log10q` = X$q.value %>% log10 %>% multiply_by(-1)
+    X$p.value = NULL
+    X$q.value = NULL
+    X$avg_diff %<>% round(2)
+    X$pct.1 %<>% round(2)
+    X$pct.2 %<>% round(2)
+    X$`-log10q` %<>% round(2)
+    return(X)
+}
+de_genes_by_ct %<>% lapply( tidy_marker_table )
+de_genes_by_ct %<>% lapply( subset, `-log10q` > 2) 
+
+#### Save tables and plots after a custom filter
+save_all_lists = function( list_of_tables = de_genes_by_ct, filter_name = "all", filter_predicate = "TRUE" ){
+  my_rp = file.path(results_path, "markers")
+  dir.create.nice(file.path(my_rp, filter_name) )
+  my_subset = function(x) subset(x, eval(parse(text=filter_predicate)))
+  de_gene_tables_filtered = lapply(list_of_tables, my_subset )
+  mapply( write.table, de_gene_tables_filtered, 
+          file.path(file.path(my_rp, filter_name), names( list_of_tables ) %>% paste0(".txt")),
+          row.names = F, quote = F, col.names = T, sep = "\t")
+ 
+}
+
+save_all_lists()
+inventory_add( filename = file.path( results_path, "markers", "all"), tag = "Rag1_DE_by_TEC_subcluster", force = T )
+```
+

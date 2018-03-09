@@ -1,0 +1,238 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+
+Right now, most of the heatmapping occurs in the marker-finding script that precedes this. 
+This script is for the GO term heatmaps.
+
+#### Load data
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+dge_atlas_TECs = inventory_get( tag = "TECS_12_P0_bag_labeled" ) %>% readRDS
+
+
+#### Choose some genes to heatmap
+de_gene_tables =
+  inventory_get("TEC_subcluster_pairwise_comparisons") %>% 
+  list.files(full.names = T) %>%
+  lapply(read.table, header = T)
+names( de_gene_tables ) = 
+  inventory_get("TEC_subcluster_pairwise_comparisons") %>%
+  list.files(full.names = F) %>%
+  sapply(strip_suffix, ".txt")
+
+```
+
+
+#### Cell cycle scores heatmap
+
+```{r}
+cc_heat = make_heatmap_for_table( dge = dge_atlas_TECs, 
+                                  genes_in_order = c( "IG1.S",
+                                                      "S", 
+                                                      "G2.M", 
+                                                      "M",
+                                                      "M.G1" ),
+                                  normalize = "both", 
+                                  norm_fun = standardize,
+                                  desired_cluster_order = paste0("TEC", 1:7) ) 
+cc_heat = cc_heat + ylab("Cell cycle score")
+cc_heat = cc_heat + scale_fill_gradient2(low = "white", high = scales::muted("green"))
+ggsave( file.path( results_path, "cc_heatmap_both_norm.pdf"), cc_heat )
+
+cc_heat = make_heatmap_for_table( dge = dge_atlas_TECs, 
+                                  genes_in_order = c( "IG1.S",
+                                                      "S", 
+                                                      "G2.M", 
+                                                      "M",
+                                                      "M.G1" ),
+                                  normalize = "row", 
+                                  norm_fun = standardize,
+                                  desired_cluster_order = paste0("TEC", 1:7) ) 
+cc_heat = cc_heat + ylab("Cell cycle score")
+cc_heat = cc_heat + scale_fill_gradient2(low = "white", high = scales::muted("green"))
+ggsave( file.path( results_path, "cc_heatmap_row_norm.pdf"), cc_heat )
+```
+
+
+### Heatmap some TEC-relevant genes from literature
+
+Filter genes for detection in 10% of cells in at least one cluster.
+
+```{r}
+TEC_markers = get_TEC_genes() %>% intersect(AvailableData(dge_atlas_TECs))
+pass_filter = make_heatmap_for_table(dge_atlas_TECs, 
+                                     TEC_markers, 
+                                     aggregator = prop_nz,
+                                     normalize = "none", 
+                                     return_type = "table") %>% 
+  apply(1, max) %>% 
+  is_greater_than(0.1) 
+TEC_markers = names(which(pass_filter))
+```
+
+##### Cluster-averaged heatmap 
+
+```{r}
+dco = paste0("TEC", 1:7)
+TEC_markers = make_heatmap_for_table( dge = dge_atlas_TECs, 
+                                         genes_in_order = TEC_markers,
+                                         ident.use = "cell_type",
+                                         norm_fun = standardize,
+                                         desired_cluster_order = dco,
+                                         return_type = "table" ) %>% OrderRowsForHeatmap 
+
+#### Make the actual heatmap
+p = make_heatmap_for_table( dge = dge_atlas_TECs, 
+                            genes_in_order = TEC_markers,
+                            ident.use = "cell_type",
+                            norm_fun = standardize,
+                            desired_cluster_order = dco, 
+                            labels = "all" ) + 
+  scale_fill_gradientn( colors = blue_gray_red ) 
+ggsave(file.path(results_path, "TEC_cluster_heatmap_lit.pdf"), plot=p, height = 10, width = 7)
+
+
+```
+
+##### Cellwise heatmap (many cells, few genes)
+
+```{r}
+
+cols_yr = colorRampPalette( c( "khaki1", "orange", "red" ) )(50)
+
+cell_order = OrderCellsWithinClusters( dge_atlas_TECs, ident.use = "cell_type" )
+norm_expr = t( apply(X = dge_atlas_TECs@data[TEC_markers, cell_order], FUN = div_by_max, MARGIN = 1) )
+TEC_markers_reorder = norm_expr %>% dist %>% (fastcluster::hclust) %>% extract2("order")
+TEC_markers %<>% extract(TEC_markers_reorder)
+norm_expr = norm_expr[TEC_markers_reorder, ]
+preview_idx = sample(3341) %>% sort
+{
+  pdf( file.path( results_path, "cellwise_few_genes.pdf" ), width = 27, height = 9 )
+  gplots::heatmap.2( norm_expr[,preview_idx], 
+                     Rowv = F, 
+                     Colv = F, 
+                     dendrogram = "none",
+                     symm = F, 
+                     scale = "none", 
+                     col = cols_yr,
+                     trace = "none",
+                     xlab = "Cells", labCol = "",
+                     ylab = "Genes", labRow = TEC_markers,
+                     RowSideColors = c("black", "grey"),
+                     ColSideColors = TEC_cols[ as.character(FetchData(dge_atlas_TECs, "cell_type")[cell_order[preview_idx], 1]) ] )
+  dev.off()
+}
+
+try({
+  rep(c(0, 1), length.out = length(TEC_markers)) %>% extract(seq_along(TEC_markers)) %>% data.frame -> X
+X$fill = X$.
+X$y = seq_along(X$fill)
+p = ggplot(X) + 
+  geom_tile(aes(fill = as.factor(fill), x = 1, y = y))  +
+  scale_fill_manual(values = c("black", "grey")) -> p
+ggsave("~/Desktop/colorbar.pdf", p, height = 10, width = 3)
+})
+
+```
+
+
+#### Heatmap data-driven markers (small)
+
+```{r}
+genes_dd_heatmap_hi = de_gene_tables %>%
+  lapply( dplyr::top_n, n = 5, wt = avg_diff ) %>%
+  lapply( extract2, "gene") %>% Reduce(f=union)
+genes_dd_heatmap_lo = de_gene_tables %>%
+  lapply( dplyr::top_n, n = 5, wt = -avg_diff ) %>%
+  lapply( extract2, "gene") %>% Reduce(f=union)
+genes_dd_heatmap = union(genes_dd_heatmap_lo, genes_dd_heatmap_hi)
+
+dco = paste0("TEC", 1:7)
+genes_dd_heatmap = make_heatmap_for_table( dge = dge_atlas_TECs, 
+                                         genes_in_order = genes_dd_heatmap,
+                                         ident.use = "cell_type",
+                                         norm_fun = standardize,
+                                         desired_cluster_order = dco, 
+                                         return_type = "table" ) %>% OrderRowsForHeatmap
+
+p = make_heatmap_for_table( dge = dge_atlas_TECs, 
+                            genes_in_order = genes_dd_heatmap,
+                            ident.use = "cell_type",
+                            norm_fun = standardize,
+                            desired_cluster_order = dco, 
+                            labels = "all" ) + 
+  scale_fill_gradientn( colors = blue_gray_red ) 
+ggsave(file.path(results_path, "TEC_cluster_heatmap_small.pdf"), plot=p, height  = 10)
+```
+
+#### Heatmap data-driven markers (large)
+
+```{r}
+#### Choose some genes to heatmap
+
+de_gene_tables =
+  inventory_get("TEC_subcluster_pairwise_comparisons") %>% 
+  list.files(full.names = T) %>%
+  lapply(read.table, header = T)
+names( de_gene_tables ) = 
+  inventory_get("TEC_subcluster_pairwise_comparisons") %>%
+  list.files(full.names = F) %>%
+  sapply(strip_suffix, ".txt")
+
+TEC_markers_data_driven = de_gene_tables %>% 
+  lapply(subset, avg_diff > 0.5, select = "gene", drop = T) %>% 
+  lapply(as.character) %>% Reduce(f=union)
+
+#### Choose an order for the genes
+dco = paste0("TEC", 1:7)
+genes_averaged = make_heatmap_for_table( dge = dge_atlas_TECs, 
+                                         genes_in_order = TEC_markers_data_driven,
+                                         ident.use = "cell_type",
+                                         norm_fun = standardize,
+                                         desired_cluster_order = dco, 
+                                         return_type = "table" )
+
+dgo = OrderRowsForHeatmap( genes_averaged )
+
+p = make_heatmap_for_table( dge = dge_atlas_TECs, 
+                            genes_in_order = dgo,
+                            ident.use = "cell_type",
+                            norm_fun = standardize,
+                            desired_cluster_order = dco, 
+                            genes_to_label = get_TEC_genes() ) + 
+  scale_fill_gradientn( colors = blue_gray_red ) 
+ggsave(file.path(results_path, "TEC_cluster_heatmap_big.pdf"), plot=p)
+
+```
+
+
+#### GO heatmap
+
+```{r}
+
+positive_markers = lapply(de_gene_tables, subset, avg_diff > 0, select = "gene", drop = T, USE.NAMES = T)
+positive_markers %<>% lapply(as.character)
+p = make_go_heatmap( positive_markers, effect_measure = "overlap", num_genes_tested = nrow(dge_atlas_TECs@data) ) 
+p = p + theme(axis.text.x = element_text(angle = 45))
+p = p + scale_fill_gradient( low = "white", high = "blue")
+ggsave(file.path(results_path, "GO_heatmap_filter_lax.pdf"), p, width = 12, height = 11)
+
+
+positive_markers = lapply(de_gene_tables, dplyr::top_n, n = 50, wt = avg_diff )
+positive_markers %<>% lapply(extract2, "gene")
+positive_markers %<>% lapply(as.character)
+p = make_go_heatmap( cluster_markers = positive_markers,
+                     effect_measure = "overlap", 
+                     num_genes_tested = nrow(dge_atlas_TECs@data) ) 
+p = p + theme( axis.text.x = element_text( angle = 45 ) )
+p = p + scale_fill_gradient( low = "white", high = "blue")
+ggsave(file.path(results_path, "GO_heatmap_top_50.pdf"), p, width = 12, height = 11)
+```
+

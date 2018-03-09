@@ -1,0 +1,61 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+Retrieve markers and set colors for cell types.
+
+```{r}
+de_genes = read.table( freezr::inventory( tag = "all_genes_tested_fine" ),
+                       header = T, stringsAsFactors = F )
+de_genes_coarse = read.table( freezr::inventory( tag = "all_genes_tested_coarse" ),
+                              header = T, stringsAsFactors = F)
+de_genes_coarse$cluster[de_genes_coarse$cluster == "BLD_most"] = "BLD1234"
+filtered_genes = rbind( de_genes        %>% subset( avg_diff > 1.5 ), 
+                        de_genes_coarse %>% subset( avg_diff > 1.5 ) )
+filtered_genes = filtered_genes[order(filtered_genes$cluster), ]
+celltype_cols = c( "deeppink", "firebrick2", "firebrick",
+                   "firebrick4", "coral3", "deeppink4", 
+                   "orange", "goldenrod",  "blue" ,
+                   "cadetblue1","cadetblue", "cadetblue3" )
+celltype_cols = c(celltype_cols, "deeppink", "red", "cyan" )
+names( celltype_cols ) = c( unique( de_genes$cluster ), unique( de_genes_coarse$cluster ) )
+dge_overview = inventory_get(tag = "overview_clean_labeled") %>% readRDS
+```
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+desired_db = c(   
+  #transcription
+  "ChEA_2016", "ENCODE_Histone_Modifications_2015",
+  # pathways
+  "KEGG_2016", "WikiPathways_2016", "NCI-Nature_2016",
+  #ontologies
+  "GO_Biological_Process_2015", #"GO_Cellular_Component_2015", "GO_Molecular_Function_2015", 
+  "MGI_Mammalian_Phenotype_Level_3",  "MGI_Mammalian_Phenotype_Level_4", 
+  # Disease
+  "OMIM_Disease",
+  # Cell types
+  "Human_Gene_Atlas", "Mouse_Gene_Atlas" )
+
+# In case I missed any spaces
+desired_db = gsub( x = desired_db, pattern = " ", replacement = "_" )
+
+
+tables_by_celltype = as.list( celltype_cols )
+for( cell_type in unique( filtered_genes$cluster ) %>% rev ){
+  geneset = subset( filtered_genes, cluster == cell_type, select = gene )[[1]]
+  tables_by_celltype[[cell_type]] = do_enrichr( results_path = results_path, 
+                                                geneset = geneset, 
+                                                geneset_name = cell_type, 
+                                                desired_db = desired_db, 
+                                                N_ANNOT_PER_DB = 2 )
+  tables_by_celltype[[cell_type]]$cell_type = cell_type
+}
+all_output = Reduce( x = tables_by_celltype, f = rbind )
+genes_GO_heatmap = get_genes_from_annot( annot = all_output )
+make_heatmap_for_table( dge_overview, genes_in_order = genes_GO_heatmap$gene, desired_cluster_order = )
+
+```

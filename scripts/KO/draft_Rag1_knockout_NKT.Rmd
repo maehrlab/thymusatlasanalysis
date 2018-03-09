@@ -1,0 +1,193 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+#### Assemble data
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+
+# Retrieve data
+dge_all_NKT = inventory_get( tag = "dge_Rag1null_plus_atlas_whole_16_5" ) %>% readRDS
+dge_all_NKT %<>% add_maehrlab_metadata("eday")
+
+# Subset NKT cells (formerly BLD5; now C3)
+dge_all_NKT %<>% SubsetDataFlex( vars.use = "cell_type", predicate = " cell_type %in% c('BLD5', 'C3') " )
+
+# Add metadata and specially-aligned TCR counts. 
+dge_all_NKT %<>% add_tcr
+dge_all_NKT %<>% add_maehrlab_metadata("eday")
+dge_all_NKT %<>% add_maehrlab_metadata("genotype")
+```
+
+#### Differential expression testing for Rag versus WT
+
+```{r}
+de_genes_ncl = FindMarkersFlex( object = dge_all_NKT,
+                                ident.use = "genotype",
+                                ident.1 = "Rag1null", 
+                                ident.2 = "wt",
+                                thresh.use = 0 )
+
+save_marker_table( de_genes_ncl, results_path, testname = "Rag1null_ncl", 
+                   remove_rp = TRUE, add_to_inventory = FALSE )
+de_genes_ncl_bak = de_genes_ncl
+de_genes_ncl %<>% subset( !is_rp(gene) )
+
+do_enrichr( geneset = de_genes_ncl %>% subset(avg_diff > 0 & q.value < 0.1, select = "gene", drop = T), 
+            results_path = results_path, geneset_name = "de_genes_ncl_Rag1_up" )
+do_enrichr( geneset = de_genes_ncl %>% subset(avg_diff < 0 & q.value < 0.1, select = "gene", drop = T), 
+            results_path = results_path, geneset_name = "de_genes_ncl_Rag1_down" )
+
+volcano_plot = function(X, main, cutoff, get_labeled_subset = head){
+  names(X) %<>% make.names
+  X[["X.log10q"]] %<>% pmin(8)
+  p = ggplot(X) + ggtitle(main) +
+    geom_point(               aes_string( x = "avg_diff", y = "X.log10q"), size = 0.2) + 
+    ggrepel::geom_text_repel( aes_string( x = "avg_diff", y = "X.log10q", label = "gene"), 
+                              min.segment.length = 0,
+                              data = get_labeled_subset( X ) ) 
+  return(p)
+}
+
+gls = function(X) {
+  Y = subset(X, gene %in% c( "Cd8a", "Cd3d", "Cd3e", "Lef1", "Id2", "Klrk1" ) )
+  return( Y )
+}
+
+p = volcano_plot( de_genes_ncl %>% tidy_marker_table, 
+                  main = "DE genes in NCL compartment", 
+                  get_labeled_subset = gls )
+ggsave( file.path(results_path, "volcano.pdf"), p, width = 4, height = 4 )
+
+
+
+```
+
+#### Redo exploration to get more resolution
+
+```{r}
+all_params = expand.grid( cc_method = c( "average" ),
+                          excess_var_cutoff = c( 0.5 ),
+                          log_expr_cutoff = c( 0.1 ), 
+                          prop_genes_to_select = NA, 
+                          num_genes_to_select = NA, 
+                          var_gene_method = "seurat",
+                          num_pc =  8, 
+                          clust_method = "SNN",
+                          clust_granularities_as_string = "0.5",
+                          plot_all_var_genes = F,
+                          stringsAsFactors = F)
+dge_all_NKT %<>% explore_embeddings(results_path= file.path(results_path, "NKT"), all_params = all_params )
+# Label via classifier or pre-existing labels
+{
+  dge_nkt_explore = inventory_get(tag = "NKT_atlas_with_tcr_cl_bag") %>% readRDS
+  dge_all_NKT  = knn_classifier( dge_train = dge_nkt_explore, 
+                                 dge_test = dge_all_NKT, 
+                                 ident.use = "ident")
+  dge_all_NKT@data.info$cell_type = dge_all_NKT@data.info$classifier_ident  %>% as.character
+  cells_overlap = intersect(dge_all_NKT@cell.names, dge_nkt_explore@cell.names)
+  dge_all_NKT@data.info[cells_overlap, "cell_type"] = FetchData(dge_nkt_explore, "ident")[cells_overlap,] %>% as.character
+  dge_all_NKT %>% custom_feature_plot("cell_type") 
+}
+param_string = collapse_by_name(all_params[1, ])
+inventory_add( filename = file.path(  results_path, "NKT", param_string, "dge.data"), 
+               tag = "NKT_all_with_tcr", force = T,
+               extra = "Seurat object with NKT cells from atlas (E16.5) plus Rag1null. Includes TCR realignment results." )
+# dge_all_NKT = readRDS(inventory_get(tag="NKT_all_with_tcr"))
+
+```
+
+#### Look at cell type ratios
+
+```{r}
+dge_all_NKT@data.info$genotype %<>% factor( levels = c("wt", "Rag1null"), ordered = T)
+p = SeuratPie(dge_all_NKT, ident.use = "cell_type", facet_by = "genotype", 
+              col = NCL_COLORS, label = T,
+              main = "Effect of Rag1 KO on NCL subtypes", do.test = F)
+ggsave(file.path(results_path, "ncl_Rag1_subtype_ratios_pie.pdf"), p)
+counts_wt = 
+  dge_all_NKT  %>% 
+    SubsetDataFlex(vars.use = "genotype", predicate = "genotype == 'wt'") %>%
+    FetchData("cell_type") %>% 
+    extract2(1) %>%
+    factor(levels = paste0("NCL", 1:8)) %>%
+    table
+counts_rag1 = 
+  dge_all_NKT %>% 
+    SubsetDataFlex(vars.use = "genotype", predicate = "genotype == 'Rag1null'") %>%
+    FetchData("cell_type") %>% 
+    extract2(1) %>%
+    factor(levels = paste0("NCL", 1:8)) %>%
+    table 
+X = data.frame(counts_wt, counts_rag1)
+X = X[c(1, 2, 4)]
+colnames(X) = c("type", "wt_count", "Rag1null_count")
+{
+  sink(file.path(results_path, "fisher_test_ncl.txt"))
+  X[c(3, 5, 6, 7), 2:3] %>% t %>% fisher.test %>% print
+  sink()
+}
+write.table(X, file.path(results_path, "ncl_Rag1_cell_type_counts.txt"), quote = F, row.names = F, sep = "\t")
+{
+  pdf(file.path(results_path, "ncl_Rag1_subtype_ratios.pdf"))
+  layout(matrix(c(1, 2), ncol = 1))
+  counts_wt %>% percentify %>% 
+    barplot(main="Atlas (wt) e16.5", ylim=c(0, 100), ylab = "Percent of sample")
+  counts_rag1 %>% percentify %>%
+    barplot(main="Rag1 -/- e16.5", ylim=c(0, 100), ylab = "Percent of sample")
+  dev.off()
+}
+```
+
+#### Save resulting plots
+
+```{r}
+
+save_feature_plots( dge_all_NKT, results_path = file.path(results_path, "NKT"),
+                    types = c("pdf", "pdf_no_leg"), gene_list_name = "nkt_genes",
+                    gene_list = get_nkt_genes())
+
+save_feature_plots( dge_all_NKT, results_path = file.path(results_path, "NKT"),
+                    types = c("pdf", "pdf_no_leg"), gene_list_name = "summary",
+                    gene_list = "eday", cols.use = Thanksgiving_colors )
+
+save_feature_plots( dge_all_NKT, results_path = file.path(results_path, "NKT"),
+                    types = c("pdf", "pdf_no_leg"), gene_list_name = "summary",
+                    gene_list = "classifier_ident", cols.use = NCL_COLORS )
+
+save_feature_plots( dge_all_NKT, results_path = file.path(results_path, "NKT"),
+                    types = c("pdf", "pdf_no_leg"), gene_list_name = "summary",
+                    gene_list = "classifier_badness" )
+
+save_feature_plots( dge_all_NKT, results_path = file.path(results_path, "NKT"),
+                    types = c("pdf", "pdf_no_leg"), gene_list_name = "summary",
+                    gene_list = "ident" )
+
+
+
+save_feature_plots( dge_all_NKT, results_path = file.path(results_path, "NKT"),
+                    types = c("pdf", "pdf_no_leg"), gene_list_name = "summary",
+                    gene_list = c("genotype"), cols.use = RAG_WT_COLORS )
+
+save_feature_plots( dge_all_NKT, results_path = file.path(results_path, "NKT"),
+                    types = c("pdf", "pdf_no_leg"), gene_list_name = "summary",
+                    gene_list = c("cell_type") , cols.use = NCL_COLORS )
+
+```
+
+
+
+```{r}
+
+
+p = TACS( dge_all_NKT, 
+          "Cd3d", "Zbtb16", 
+          cutoffs = c(0.7, 0.5),
+          facet_by = "genotype" )
+
+```

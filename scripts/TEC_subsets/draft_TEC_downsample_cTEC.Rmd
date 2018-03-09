@@ -1,0 +1,51 @@
+---
+title: "Figure drafts for Jan 2017 submission"
+author: "Eric Kernfeld"
+date: "January 18, 2017"
+output: html_document
+---
+
+#### Load data
+
+```{r}
+results_path = Sys.getenv( "FREEZR_DESTINATION" )
+
+dge_atlas_TECs = inventory_get( tag = "TECS_12_P0_bag_labeled" ) %>% readRDS
+
+barcodes_all = FetchData( dge_atlas_TECs, c("eday", "cell_type") )
+barcodes_all$cell_type = ifelse( barcodes_all$cell_type %in% paste0("TEC", 1:3), yes = "mTEC", no = "cTEC")
+counts = table(barcodes_all$eday, barcodes_all$cell_type)
+num_to_sample = counts[, "mTEC"]
+barcodes_downsampled = c()
+for( day_to_sample in 12.5:19.5 ){
+  sample_from = subset( barcodes_all, (cell_type == "cTEC") & (eday == day_to_sample) )
+  x = sample(size = num_to_sample[paste0(day_to_sample)], x = nrow(sample_from), replace = F)
+  barcodes_downsampled %<>% c( rownames(sample_from[x, ]) )
+}
+barcodes_downsampled %<>% c( rownames( subset( barcodes_all, (cell_type == "mTEC") ) ) )
+assertthat::are_equal( length(barcodes_downsampled), 2*sum(barcodes_all$cell_type == "mTEC") )
+dge_atlas_TECs_subsampled = SubsetData( dge_atlas_TECs, cells.use = barcodes_downsampled )
+dge_atlas_TECs_subsampled
+```
+
+#### Reanalyze downsampled data
+
+```{r}
+all_params = expand.grid( cc_method = c( "average" ),
+                          excess_var_cutoff = c( 0.5 ),
+                          log_expr_cutoff = c( 0.1 ), 
+                          prop_genes_to_select = NA, 
+                          num_genes_to_select = NA, 
+                          var_gene_method = "seurat",
+                          num_pc =  12, 
+                          clust_method = "SNN",
+                          clust_granularities_as_string = "0.5",
+                          plot_all_var_genes = F,
+                          stringsAsFactors = F)
+dge_atlas_TECs_subsampled %<>% explore_embeddings( results_path = results_path, all_params)
+dge_atlas_TECs_subsampled@data.info$label_in_paper = 
+  dge_atlas_TECs@data.info[dge_atlas_TECs_subsampled@data.info %>% rownames, "cell_type"]
+save_feature_plots(dge_atlas_TECs_subsampled,  results_path,
+                   gene_list = c("label_in_paper", "eday", "Krt5", "Pvrl4", "Cldn4", "Cldn3", "Aire", "Prss16", "Psmb11", "Cd74", "Six1", "Eya1", "Epcam", "Cd24a", "Ackr4", "Ccl25", "ident"), 
+                   types = "PDF", width = 10)
+```
