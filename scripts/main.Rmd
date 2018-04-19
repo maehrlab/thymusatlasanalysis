@@ -9,7 +9,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 
-# You may need to setwd(proj_dir) in the console due to knitr's well-documented working directory insanity.
+# You may need to run setwd(proj_dir) in the console due to knitr's well-documented working directory insanity.
 proj_dir = "~/Desktop/scRNA_data_analysis/atlas_paper_2017/scRNA_redo_12_p0"
 setwd(file.path(proj_dir, "scripts"))
 PATH_TO_SEURAT_1 = "~/Library/R/3.3/library/Seurat_1"
@@ -79,11 +79,10 @@ last_dest = flash_freeze( "overview/draft_overview_make_depict_input.Rmd" )
 
 ```{r}
 last_dest = flash_freeze( "overview/draft_overview_Tcell.Rmd" )
-last_dest = flash_freeze( "NKT/draft_NKT_explore.Rmd" ) 
-last_dest = flash_freeze( "NKT/draft_NKT_markers.Rmd" ) 
-last_dest = flash_freeze( "NKT/draft_NKT_lit_tables.Rmd" ) 
-last_dest = flash_freeze( "NKT/draft_NKT_make_depict_input.Rmd" ) 
-last_dest = flash_freeze( "NKT/draft_NCL4_vs_thymocytes.Rmd" ) 
+last_dest = flash_freeze( "NCL/draft_NCL_explore.Rmd" ) 
+last_dest = flash_freeze( "NCL/draft_NCL_markers.Rmd" ) 
+last_dest = flash_freeze( "NCL/draft_NCL_lit_tables.Rmd" ) 
+last_dest = flash_freeze( "NCL/draft_NCL_make_depict_input.Rmd" ) 
 ```
 
 ### Describing the atlas TEC heterogeneity
@@ -99,20 +98,6 @@ last_dest = flash_freeze( "TEC_subsets/draft_TEC_het_atlas_plus_sorted.Rmd" )
 last_dest = flash_freeze( "TEC_subsets/draft_TEC_het_atlas_plus_adult.Rmd" ) 
 last_dest = flash_freeze( "TEC_subsets/draft_cTEC_pt.Rmd" ) 
 last_dest = flash_freeze( "TEC_subsets/draft_mTEC_pt.Rmd" ) 
-```
-
-### Describe the atlas myeloid compartment
-
-```{r}
-last_dest = flash_freeze( "myeloid/draft_myeloid_explore.Rmd" ) 
-last_dest = flash_freeze( "myeloid/draft_myeloid_markers.Rmd" ) 
-```
-
-### Describe the atlas mesenchyme 
-
-```{r}
-last_dest = flash_freeze( "mesenchyme/draft_mesenchyme_explore.Rmd" ) 
-last_dest = flash_freeze( "mesenchyme/draft_mesenchyme_markers.Rmd" ) 
 ```
 
 ## Exploring perturbations and Rag1 knockouts
@@ -131,50 +116,29 @@ The initial exploratory script performs the T-cell isolation for the Theis lab.
 ```{r}
 last_dest = flash_freeze( "KO/draft_Rag1_knockout_explore.Rmd" ) 
 last_dest = flash_freeze( "KO/draft_Rag1_knockout_Tcell.Rmd" ) 
-last_dest = flash_freeze( "KO/draft_Rag1_knockout_NKT.Rmd" ) 
+last_dest = flash_freeze( "KO/draft_Rag1_knockout_NCL.Rmd" ) 
 last_dest = flash_freeze( "KO/draft_Rag1_knockout_TEC_explore.Rmd" ) 
 last_dest = flash_freeze( "KO/draft_Rag1_knockout_TECs.Rmd" ) 
 ```
 
-#### FTOC without BMS493
+#### FTOC 
 
 ```{r}
-last_dest = flash_freeze( "FTOC_RA_NO_BMS/NO_BMS_FTOC_explore.Rmd" ) 
-last_dest = flash_freeze( "FTOC_RA_NO_BMS/NO_BMS_FTOC_explore_control.Rmd" ) 
-last_dest = flash_freeze( "FTOC_RA_NO_BMS/NO_BMS_FTOC_assess_control.Rmd" ) 
-last_dest = flash_freeze( "FTOC_RA_NO_BMS/NO_BMS_FTOC_assess_control_TEC.Rmd" ) 
-last_dest = flash_freeze( "FTOC_RA_NO_BMS/NO_BMS_FTOC_TEC.Rmd" ) 
-last_dest = flash_freeze( "FTOC_RA_NO_BMS/NO_BMS_FTOC_Tcell.Rmd" ) 
-last_dest = flash_freeze( "FTOC_RA_NO_BMS/NO_BMS_FTOC_NKT.Rmd" ) 
+last_dest = flash_freeze( "FTOC_RA/FTOC_explore.Rmd" ) 
+last_dest = flash_freeze( "FTOC_RA/FTOC_explore_control.Rmd" ) 
+last_dest = flash_freeze( "FTOC_RA/FTOC_assess_control.Rmd" ) 
+last_dest = flash_freeze( "FTOC_RA/FTOC_assess_control_TEC.Rmd" ) 
+last_dest = flash_freeze( "FTOC_RA/FTOC_TEC.Rmd" ) 
+last_dest = flash_freeze( "FTOC_RA/FTOC_Tcell.Rmd" ) 
+last_dest = flash_freeze( "FTOC_RA/FTOC_NCL.Rmd" ) 
 ```
 
 ###Odds and ends
 
 ```{r}
-
 # # Do some extra QC, checking replicates via t-SNE after removal of doublets
 last_dest = flash_freeze( "qc/draft_extra_qc.Rmd" )
 # # QC on peripheral data 
 last_dest = flash_freeze( "draft_peripheral_qc.Rmd" )
-# # Check for receptor-ligand pairs expressed in each cell type
-last_dest = flash_freeze( "draft_rl_mTEC_cTEC.Rmd" )
 ```
 
-
-### Exports & collaborations
-
-```{r}
-last_dest = flash_freeze( "collab/EBI2.Rmd" )
-last_dest = flash_freeze( "draft_TEC_pt_to_Michael.Rmd" )
-
-last_dest = flash_freeze( "draft_rl_thymocyte_cTEC.Rmd" )
-
-
-last_dest = flash_freeze( "collab/subset_blood.Rmd" )
-last_dest = flash_freeze( "collab/explore_blood_17_18_p0.Rmd" )
-params = "cc_method=average|excess_var_cutoff=1.2|log_expr_cutoff=0.1|num_genes_to_select=NA|prop_genes_to_select=NA|var_gene_method=seurat|num_pc=25|clust_method=SNN|clust_granularities_as_string=0.5|plot_all_var_genes=FALSE"
-freezr::inventory_add( inv_location = today_dest, 
-                       tag = "explore_17_18_p0", force = T,
-                       filename = file.path( basename(last_dest), "user", params, "dge.data"  ) )
-last_dest = flash_freeze( "collab/subset_blood_17_18_p0.Rmd" )
-```
