@@ -14,16 +14,6 @@ You may need to edit the first few lines depending on where your data reside(s).
 
 ```{r}
 
-PATH_TO_DATA = file.path( "~", "Dropbox", "2016JULY07scRNAseq", "data" )
-PATH_TO_METADATA = file.path( PATH_TO_DATA, "DROPseq_stats_working.csv")
-if( path.expand("~") == "/Users/erickernfeld" ){
-  # For me
-  PATH_TO_TABLES = file.path( "~","Desktop","scRNA_redo_12_p0", "tables" ) 
-} else {
-  # For my team
-  PATH_TO_TABLES = file.path( "~","Dropbox","2016JULY07scRNAseq","tables" ) 
-}
-
 
 # Generally indispensible
 library(ggplot2)

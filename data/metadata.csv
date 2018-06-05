@@ -1,0 +1,95 @@
+Sample_ID,sample_id_prefix,rep_num_in_2017_paper,external_id,species,technology,pipeline,fastq_generation,genome,genotype,source_tissue,perturbation,diff_protocol_human,eday,dissection,dissociation,FACS_sorting,RBC_lysis,parathyroid_present,sequencing_date,transcripts,cells,umis_in_dge,umis_per_cell,any_female_cells,notes,files_available,dge_path_rel,tcr_dge_path,dge_checksum
+e12_5wholeThy_venus,E12_5_wholeThy_venus,1,E12_5_wholeThy_venus_1,mouse,dropseq,dropseq,illumina,,Pax9-Venus,embryo,NA,NA,12.5,thymus and parathyroid by mechanical separation,trypsin,Live cells,no,yes,2016MAY03,15865,576,2816244,4889.3125,no,,yes,e12_5wholeThy_venus_star_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_e12_5wholeThy_venus_TCR.dge.txt.gz,587379e43ae265e7ddfd05122a77b6b2
+e13_5_wholeThymus_wt_rep4,E13_5_wholeThy,1,E13_5_wholeThy_1,mouse,dropseq,dropseq,illumina,,wt,embryo,NA,NA,13.5,thymus by mechanical separation,trypsin,Live cells,yes,no,2016SEP12,16186,1378,5490836,3984.641509,no,,yes,e13_5_wholeThymus_wt_rep4_star_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_e13_5_wholeThymus_wt_rep4_TCR.dge.txt.gz,7a541f503c752808735b0b0cdeece323
+E14_5_WholeThy_rep2,E14_5_wholeThy,1,E14_5_wholeThy_1,mouse,dropseq,dropseq,illumina,,wt,embryo,NA,NA,14.5,thymus by mechanical separation,trypsin,Live cells,yes,no,2016NOV23,15681,820,4019975,4902.408537,no,,yes,E14_5_WholeThy_rep2_star_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_E14_5_WholeThy_rep2_TCR.dge.txt.gz,653e222e0e12aa982d5ae497ff935acf
+E15_5_WholeThy_Rep1,E15_5_wholeThy,1,E15_5_wholeThy_1,mouse,dropseq,dropseq,illumina,,wt,embryo,NA,NA,15.5,thymus by mechanical separation,trypsin,Live cells,yes,no,2016DEC29,15344,676,3077873,4553.066568,no,,yes,E15_5_WholeThy_Rep1_star_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_E15_5_WholeThy_Rep1_TCR.dge.txt.gz,a6ee1c1ff463ce0ebcaf953601229947
+E16_5_WholeThy_Rep2_combine,E16_5_wholeThy,1,E16_5_wholeThy_1,mouse,dropseq,dropseq,illumina,,wt,embryo,NA,NA,16.5,thymus by mechanical separation,trypsin,Live cells,yes,no,2017JAN30,14227,915,2772883,3030.473224,no,Resequencing of e16_5_whole_thy_rep2 processed together with original reads,yes,E16_5_WholeThy_Rep2_combine_star_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_E16_5_WholeThy_Rep2_combine_TCR.dge.txt.gz,72df66e520afa10e2eb2634a21bd4f57
+E17_5_WholeThy_rep1,E17_5_wholeThy,1,E17_5_wholeThy_1,mouse,dropseq,dropseq,illumina,,wt,embryo,NA,NA,17.5,thymus by mechanical separation,trypsin,Live cells,yes,no,2017APR13,14501,996,4095380,4111.827309,no,,yes,E17_5_WholeThy_rep1_star_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_E17_5_WholeThy_rep1_TCR.dge.txt.gz,a74ddd50fea31a2a1cb852901be78f5e
+E18_5_WholeThy_rep1,E18_5_wholeThy,1,E18_5_wholeThy_1,mouse,dropseq,dropseq,illumina,,wt,embryo,NA,NA,18.5,thymus by mechanical separation,trypsin,Live cells,yes,no,2017APR13,13345,473,1484579,3138.64482,no,,yes,E18_5_WholeThy_rep1_star_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_E18_5_WholeThy_rep1_TCR.dge.txt.gz,b2b0ec2931955919e60974a75d4175b2
+P0_LeftLobe,P0_wholeThy,1,P0_wholeThy_1,mouse,dropseq,dropseq,illumina,,wt,embryo,NA,NA,19.5,thymus by mechanical separation,trypsin,Live cells,yes,no,2017APR14,13488,434,1361008,3135.963134,no,same animal as P0_RightLobe,yes,P0_LeftLobe_star_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_P0_LeftLobe_TCR.dge.txt.gz,d498b214cd81d9a3b083381f9e06ab72
+FTOC_PBSDMSO_rep1,FTOC_PBSDMSO,1,FTOC_PBSDMSO_1,mouse,dropseq,dropseq,illumina,,wt,FTOC,CTRL,NA,16.5,mechanical isolation and trypsin,trypsin,live cells,yes,yes,2017JUN02,15750,1010,3665982,3629.685149,no,Control,yes,star_FTOC_PBSDMSO_rep1_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_FTOC_PBSDMSO_rep1_TCR.dge.txt.gz,324adfef62c3f05305f80f8cb19cc6b0
+FTOC_RA_rep1,FTOC_RA,1,FTOC_RA_1,mouse,dropseq,dropseq,illumina,,wt,FTOC,RA,NA,16.5,mechanical isolation and trypsin,trypsin,live cells,yes,yes,2017JUN02,16019,1067,4243885,3977.39925,no,RA added,yes,star_FTOC_RA_rep1_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_FTOC_RA_rep1_TCR.dge.txt.gz,7f3840ce94a5356a5072598ecfab8c83
+Rag1KO_WholeThy_rep1,Rag1KO_wholeThy,1,Rag1KO_wholeThy_1,mouse,dropseq,dropseq,illumina,,Rag1null,embryo,Rag1null,NA,16.5,thymus by mechanical separation,trypsin,Live cells,yes,no,2017AUG02,15159,912,3368592,3693.631579,no,,yes,star_Rag1KO_WholeThy_rep1_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_Rag1KO_WholeThy_rep1_TCR.dge.txt.gz,eb05dcc8e2c7704375d8211fa6fd4a51
+e12_5wholeThy_venus_rep2,E12_5_wholeThy_venus,2,E12_5_wholeThy_venus_2,mouse,dropseq,dropseq,illumina,,Pax9-Venus,embryo,NA,NA,12.5,thymus and parathyroid by mechanical separation,trypsin,Live cells,yes,yes,2016MAY28,15501,276,2273615,8237.735507,no,,yes,e12_5wholeThy_venus_rep2_star_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_e12_5wholeThy_venus_rep2_TCR.dge.txt.gz,9aeca95f14f955606aec3efdc77aac7e
+e13_5_wholeThymus_wt_rep5,E13_5_wholeThy,2,E13_5_wholeThy_2,mouse,dropseq,dropseq,illumina,,wt,embryo,NA,NA,13.5,thymus by mechanical separation,trypsin,Live cells,yes,no,2016SEP12,16122,994,5014306,5044.573441,no,,yes,e13_5_wholeThymus_wt_rep5_star_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_e13_5_wholeThymus_wt_rep5_TCR.dge.txt.gz,3cced2d12de3e91f7b5e58ce4066a90c
+E14_5_WholeThy_rep4,E14_5_wholeThy,2,E14_5_wholeThy_2,mouse,dropseq,dropseq,illumina,,wt,embryo,NA,NA,14.5,thymus by mechanical separation,trypsin,Live cells,yes,no,2017FEB14,15848,834,4897625,5872.452038,no,Used new kits that turned out to work better,yes,E14_5_WholeThy_Rep4_star_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_E14_5_WholeThy_Rep4_TCR.dge.txt.gz,058a53d54de08dc47e4e5222bb656cf4
+E15_5_WholeThy_Rep2,E15_5_wholeThy,2,E15_5_wholeThy_2,mouse,dropseq,dropseq,illumina,,wt,embryo,NA,NA,15.5,thymus by mechanical separation,trypsin,Live cells,yes,no,2016DEC29,15426,830,3700765,4458.753012,no,,yes,E15_5_WholeThy_Rep2_star_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_E15_5_WholeThy_Rep2_TCR.dge.txt.gz,eb6b6aa39a8a3b3b70a6660c4fca6d4f
+E16_5_WholeThy_Rep3_combine,E16_5_wholeThy,2,E16_5_wholeThy_2,mouse,dropseq,dropseq,illumina,,wt,embryo,NA,NA,16.5,thymus by mechanical separation,trypsin,Live cells,yes,no,2017JAN30,14891,1016,3657823,3600.219488,no,Resequencing of e16_5_whole_thy_rep3 processed together with original reads,yes,E16_5_WholeThy_Rep3_combine1_star_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_E16_5_WholeThy_Rep3_combine_TCR.dge.txt.gz,2641a72c6ce57ad79e0e5d494a303c3b
+E17_5_WholeThy_rep2,E17_5_wholeThy,2,E17_5_wholeThy_2,mouse,dropseq,dropseq,illumina,,wt,embryo,NA,NA,17.5,thymus by mechanical separation,trypsin,Live cells,yes,no,2017APR13,14767,1040,3925676,3774.688462,no,,yes,E17_5_WholeThy_rep2_star_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_E17_5_WholeThy_rep2_TCR.dge.txt.gz,6cd5705b8036457e9e8be3eb6780103a
+E18_5_WholeThy_rep2,E18_5_wholeThy,2,E18_5_wholeThy_2,mouse,dropseq,dropseq,illumina,,wt,embryo,NA,NA,18.5,thymus by mechanical separation,trypsin,Live cells,yes,no,2017APR13,12992,440,1326309,3014.338636,no,,yes,E18_5_WholeThy_rep2_star_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_E18_5_WholeThy_rep2_TCR.dge.txt.gz,4af71a120e08d54bdb7c97b55d8dadc3
+P0_RightLobe,P0_wholeThy,2,P0_wholeThy_2,mouse,dropseq,dropseq,illumina,,wt,embryo,NA,NA,19.5,thymus by mechanical separation,trypsin,Live cells,yes,no,2017APR14,13688,539,1762671,3270.261596,no,same animal as P0_LeftLobe,yes,P0_RightLobe_star_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_P0_RightLobe_TCR.dge.txt.gz,0b3f238f6a79ef2490376c47f9cd5fd2
+FTOC_PBSDMSO_rep2,FTOC_PBSDMSO,2,FTOC_PBSDMSO_2,mouse,dropseq,dropseq,illumina,,wt,FTOC,CTRL,NA,16.5,mechanical isolation and trypsin,trypsin,live cells,yes,yes,2017JUN14,16134,1373,5321227,3875.620539,yes,Control,yes,star_FTOC_PBSDMSO_rep2_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_FTOC_PBSDMSO_rep2_TCR.dge.txt.gz,638a93f90d1861f54f4207b46c8cfc8f
+FTOC_RA_rep2,FTOC_RA,2,FTOC_RA_2,mouse,dropseq,dropseq,illumina,,wt,FTOC,RA,NA,16.5,mechanical isolation and trypsin,trypsin,live cells,yes,yes,2017JUN14,16263,1092,4451291,4076.27381,no,RA added,yes,star_FTOC_RA_rep2_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_FTOC_RA_rep2_TCR.dge.txt.gz,dc47eafb118661aa851399b6f0d0ebcd
+Rag1KO_WholeThy_rep2,Rag1KO_wholeThy,2,Rag1KO_wholeThy_2,mouse,dropseq,dropseq,illumina,,Rag1null,embryo,Rag1null,NA,16.5,thymus by mechanical separation,trypsin,Live cells,yes,no,2017AUG02,14979,1100,3275702,2977.910909,no,,yes,star_Rag1KO_WholeThy_rep2_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_Rag1KO_WholeThy_rep2_TCR.dge.txt.gz,bcccce6090455bd3e54e009e8c414399
+e12_5wholeThy_venus_rep3,E12_5_wholeThy_venus,3,E12_5_wholeThy_venus_3,mouse,dropseq,dropseq,illumina,,Pax9-Venus,embryo,NA,NA,12.5,thymus and parathyroid by mechanical separation,trypsin,Live cells,no,yes,2016AUG10,16001,895,3604897,4027.817877,no,,yes,e12_5wholeThy_venus_rep3_star_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_e12_5_wholeThymus_venus_rep3_TCR.dge.txt.gz,4eb7d90394d02f34008f6cffb08ed326
+e13_5wholeThy_wt_rep3,E13_5_wholeThy,3,E13_5_wholeThy_3,mouse,dropseq,dropseq,illumina,,wt,embryo,NA,NA,13.5,thymus by mechanical separation,trypsin,Live cells,yes,no,2016AUG10,16204,1397,5932042,4246.272011,no,,yes,e13_5wholeThy_wt_rep3_star_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_e13_5_wholeThymus_wt_rep3_TCR.dge.txt.gz,6094da7133e9f094b1914a738d0153c0
+e16_5_wholeThymus_wt_rep1,E16_5_wholeThy,3,E16_5_wholeThy_3,mouse,dropseq,dropseq,illumina,,wt,embryo,NA,NA,16.5,thymus by mechanical separation,trypsin,Live cells,yes,no,2016SEP12,14996,900,3833964,4259.96,no,,yes,e16_5_wholeThymus_wt_rep1_star_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_e16_5_wholeThymus_wt_rep1_TCR.dge.txt.gz,7cf935d42653f67e5215e0bbfb242bd1
+FTOC_PBSDMSO_rep3,FTOC_PBSDMSO,3,FTOC_PBSDMSO_3,mouse,dropseq,dropseq,illumina,,wt,FTOC,CTRL,NA,16.5,mechanical isolation and trypsin,trypsin,live cells,yes,yes,2017JUN20,15847,1277,4903322,3839.719655,no,Control,yes,star_FTOC_PBSDMSO_rep3_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_FTOC_PBSDMSO_rep3_TCR.dge.txt.gz,b099f666238c5b6bb2c98b165ddbdf61
+FTOC_RA_rep3,FTOC_RA,3,FTOC_RA_3,mouse,dropseq,dropseq,illumina,,wt,FTOC,RA,NA,16.5,mechanical isolation and trypsin,trypsin,live cells,yes,yes,2017JUN20,16191,1019,4490166,4406.443572,no,RA added,yes,star_FTOC_RA_rep3_merged_gene_exon_tagged_clean.dge.txt.gz,~/Dropbox/2016JULY07scRNAseq/data/dge_tcr/star_FTOC_RA_rep3_TCR.dge.txt.gz,2385288ea3b6839233d6cd28ad639379
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
