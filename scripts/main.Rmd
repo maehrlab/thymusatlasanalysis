@@ -10,7 +10,7 @@ output: html_document
 ```{r setup, include=FALSE}
 
 # You may need to run setwd(proj_dir) in the console due to knitr's well-documented working directory insanity.
-proj_dir = "~/Desktop/scRNA_data_analysis/atlas_paper_2017/immunity_paper_release"
+proj_dir = "~/Dropbox/atlas_paper_2017/immunity_paper_release"
 get_metadata_path = function() file.path( proj_dir, "data", "metadata.csv")
 setwd(file.path(proj_dir, "scripts"))
 PATH_TO_SEURAT_1 = "~/Library/R/3.3/library/Seurat_1"
@@ -42,6 +42,19 @@ flash_freeze = function( analysis_to_run = NULL, results_subdir = NULL ){
                                      "~/Desktop/software_projects/thymusatlastools", 
                                      "~/Desktop/software_projects/freezr") )
 }
+```
+
+#### Inventory setup
+
+This bit of code creates an inventory, which is `freezr`'s way of tracking important data files. The first file tracked is a table to help convert between two sets of cluster names that were both considered during the project. 
+
+```{r}
+atlas_inventory_location = file.path(proj_dir, "results")
+inventory_exists( inv_location = atlas_inventory_location )
+try( inventory_make(   inv_location = atlas_inventory_location ) )
+inventory_add( tag = "overview_old_labels",
+               filename = file.path(proj_dir, "tables", "fig1_label_conversions.txt" ), 
+               inv_location = atlas_inventory_location )
 ```
 
 #### Namespace setup
