@@ -6,8 +6,6 @@ output: html_document
 ---
 
 
-```{r}
-
 ###Basic QC
 
 ```{r}
@@ -106,6 +104,4 @@ plot_pairs = function( X, main = "" ){
   }
 }
 
-
-```
 ```

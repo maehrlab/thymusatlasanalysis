@@ -10,7 +10,7 @@ output: html_document
 results_path = Sys.getenv( "FREEZR_DESTINATION" )
 
 # # Check to see the data is actually all there
-metadata = thymusatlasdataprivate::get_metadata()
+metadata = get_metadata()
 metadata$file_exists_auto = metadata$dge_path %>% file.exists 
 existence_status_correct = metadata$file_exists_auto == ( metadata$files_available == "yes" )
 if( !all( existence_status_correct ) ){
