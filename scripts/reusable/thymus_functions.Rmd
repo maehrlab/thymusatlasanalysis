@@ -148,7 +148,9 @@ add_edayXother = function( dge, other, other_levels ){
 }
 
 get_depict_genes = function(){
-  orig_expr_mat = "~/Desktop/depict_with_atlas/depict/data/original tissue expression/GPL570EnsemblGeneExpressionPerTissue_DEPICT20130820_z.txt"
+  # note: I've replaced the original table GPL570EnsemblGeneExpressionPerTissue_DEPICT20130820_z.txt with
+  # a smaller one that has the same gene names.
+  orig_expr_mat = file.path(proj_dir, "tables", "GPL570EnsemblGeneExpressionPerTissue_DEPICT20130820_z.txt")
   x = read.table( orig_expr_mat, 
                   row.names = 1, header = T, stringsAsFactors = F, sep = "\t" ) %>% rownames
   return(x)
