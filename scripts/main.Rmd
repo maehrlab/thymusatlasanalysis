@@ -12,6 +12,8 @@ output: html_document
 # You may need to run setwd(proj_dir) in the console due to knitr's well-documented working directory insanity.
 proj_dir = "~/Dropbox/atlas_paper_2017/immunity_paper_release"
 get_metadata_path = function() file.path( proj_dir, "data", "metadata.csv")
+get_metadata = function() read.csv(file.path(get_metadata_path()), stringsAsFactors = F)
+
 setwd(file.path(proj_dir, "scripts"))
 PATH_TO_SEURAT_1 = "~/Library/R/3.3/library/Seurat_1"
 # withr::with_libpaths( PATH_TO_SEURAT_1, devtools::install_github( "maehrlab/thymus_atlas_tools" ) )
