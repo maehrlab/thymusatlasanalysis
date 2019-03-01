@@ -15,7 +15,7 @@ results_path = Sys.getenv( "FREEZR_DESTINATION" )
 
 dge_ftoc = c( "FTOC_PBSDMSO_rep1", "FTOC_PBSDMSO_rep2", "FTOC_PBSDMSO_rep3" ,
               "FTOC_RA_rep1", "FTOC_RA_rep2", "FTOC_RA_rep3" ) %>%
-  load_thymus_profiling_data %>% dge_merge_list %>% seuratify_thy_data( results_path )
+  cross_platform_data_loader %>% dge_merge_list %>% seuratify_thy_data( results_path )
 dge_ftoc %<>% add_maehrlab_metadata( "eday" )
 dge_ftoc %<>% add_maehrlab_metadata( "perturbation" )
 

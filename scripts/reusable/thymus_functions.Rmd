@@ -918,7 +918,7 @@ get_vivo_versus_vitro_data = function( results_path, test_mode = F, include_huma
   return(dge)
 }
 
-load_thymus_profiling_data = function (sample_ids = "all", test_mode = F, lincRNA = F) {
+cross_platform_data_loader = function (sample_ids = "all", test_mode = F, lincRNA = F) {
   
   # # Subset metadata down to just the desired samples
   metadata = get_metadata()

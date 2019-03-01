@@ -13,7 +13,7 @@ output: html_document
 results_path = Sys.getenv( "FREEZR_DESTINATION" )
 
 dge_rag1 = c("Rag1KO_WholeThy_rep1", "Rag1KO_WholeThy_rep2" ) %>%
-  load_maehrlab_private_data %>% dge_merge_list %>% seuratify_thy_data( results_path )
+  cross_platform_data_loader %>% dge_merge_list %>% seuratify_thy_data( results_path )
 dge_rag1 %<>% add_tcr
 dge_rag1 = add_maehrlab_metadata( dge_rag1, "eday" )
 dge_rag1 %<>% add_cc_score %>% extract2("dge")
