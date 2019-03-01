@@ -67,16 +67,9 @@ This interactive run loads in `thymus_functions.Rmd` so you can play around usin
 flash_freeze()
 ```
 
-### QC and doublet removal
+### Data assembly and initial exploration
 
 ```{r}
-# # QC
-# Use this to screen everything.
-last_dest = flash_freeze( "qc/qc_all.Rmd" )
-# Use this for quickly checking just a few new samples.
-# last_dest = flash_freeze( "qc/qc_some.Rmd" )
-
-# # Data assembly and initial exploration
 last_dest = flash_freeze( "overview/draft_data_assemble.Rmd" )
 last_dest = flash_freeze( "overview/draft_doublet_fig.Rmd" )
 ```
