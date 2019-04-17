@@ -12,7 +12,7 @@ This tells the code where to find itself.
 ```{r setup, include=FALSE}
 
 # You may need to run setwd(proj_dir) in the console due to knitr's well-documented working directory insanity.
-proj_dir = "~/Desktop/thymusatlasanalysis-master"
+proj_dir = "~/Desktop/thymusatlasanalysis"
 setwd(file.path(proj_dir, "scripts"))
 ```
 
@@ -25,9 +25,8 @@ dir.create(PATH_TO_PROJECT_PACKAGES)
 withr::with_libpaths( PATH_TO_PROJECT_PACKAGES, devtools::install_github( "satijalab/seurat", ref = "d9d1a8b" ) )
 withr::with_libpaths( PATH_TO_PROJECT_PACKAGES, devtools::install_github( "maehrlab/thymusatlastools" ) )
 withr::with_libpaths( PATH_TO_PROJECT_PACKAGES, devtools::install_github( "ekernf01/freezr" ) )
-if (!requireNamespace("BiocManager", quietly = TRUE))
-   install.packages("BiocManager")
-BiocManager::install("destiny", version = "3.8", )
+if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+BiocManager::install("destiny", version = "3.8" )
 library(Seurat,           lib.loc = PATH_TO_PROJECT_PACKAGES)
 library(thymusatlastools, lib.loc = PATH_TO_PROJECT_PACKAGES)
 library(freezr,           lib.loc = PATH_TO_PROJECT_PACKAGES)

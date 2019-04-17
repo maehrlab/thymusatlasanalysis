@@ -17,7 +17,7 @@ draft_sampleids = get_sample_groups( c( "whole_e12_5",
                                         "whole_e17_5", 
                                         "whole_e18_5",
                                         "whole_p0"), combine = T )
-dge_list = cross_platform_data_loader( draft_sampleids, test_mode = F )
+dge_list = cross_platform_data_loader( sample_ids = draft_sampleids, test_mode = F )
 raw_dge = dge_merge_list( dge_list ); rm( dge_list ); gc()
 dge = seuratify_thy_data( raw_dge, results_path, test_mode = F, min.cells = 10 ); rm( raw_dge ); gc()
 dge %<>% add_maehrlab_metadata( "eday" )

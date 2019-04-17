@@ -737,17 +737,7 @@ OrderRowsForHeatmap = function( X,
 
 #####Whole samples (`whole_e*`)
 
-The goal here is to find out what cell subpopulations are present at the earliest stage of thymus formation. We expect to see thymus and parathyroid tissue, and we expect to cell epithelial cells, mesenchymal cells, and blood. This dataset contains three biological replicates from Venus mice dissected at embryonic day 12.5 and likewise for wildtype mice at day 13.5. UPDATE: added the day 14.5 data to the `whole_organ` samples on 2016 Nov 28.
-
-These analyses are for a first pass. Once we identify some clusters of interest, we can load the data back in, subset them, and look for interesting subpopulations.
-
-#####Time-series of sorted samples (`time_sorted_*`)
-
-The goal here is to take a look at the days leading up to thymus specification. We want to see when various subpopulations start to become well-defined and what genes seem to be implicated. There are strong temporal effects, so in addition to looking at days 10.5-12.5 together, we look at them day by day. One analysis also adds in day 13.5.
-
-#####In-vitro cell lines
-
-These cell lines are from the lab's attempts at human and mouse thymus production in a dish. We want to compare them to the timeseries data and see where they fit in (and what to do next!).
+The goal here is to find out what cell subpopulations are present at the earliest stage of thymus formation. We expect to see thymus and parathyroid tissue, and we expect to cell epithelial cells, mesenchymal cells, and blood. This dataset contains three biological replicates from Venus mice dissected at embryonic day 12.5 and likewise for wildtype mice at day 13.5. 
 
 ```{r}
 # Returns a list of character vectors named by sample type with entries containing 
@@ -761,14 +751,6 @@ get_data_by_replicates = function(){
                                      "whole_e17_5",
                                      "whole_e18_5",
                                      "whole_p0",
-                                     "whole_adult",
-                                     "human_patient",
-                                     "time_sorted_9", 
-                                     "time_sorted_10",    
-                                     "time_sorted_11", 
-                                     "time_sorted_12",   
-                                     "time_sorted_13",   
-                                     "time_sorted_16",
                                      "FTOC_RA_RA",
                                      "FTOC_RA_BMS",
                                      "FTOC_RA_CTRL",
@@ -807,24 +789,7 @@ get_sample_groups = function(analyses = "whole_organ", combine = F){
                      whole_e18_5 = c( "E18_5_WholeThy_rep1",
                                       "E18_5_WholeThy_rep2" ),
                      whole_p0    = c( "P0_LeftLobe",
-                                      "P0_RightLobe"),
-                     whole_adult = c( "adult_thy_rep1",
-                                      "adult_thy_rep2" ),
-                     human_patient = c( "hThymus_C_Epcam",
-                                        "hThymus_D_Epcam" ) ) 
-  
-  sorted_timeseries = list(time_sorted_9     = c( "e9_5",
-                                                  "e9_5_rep2"),
-                           time_sorted_10    = c( "e10_5",
-                                                  "e10_5rep3" ),
-                           time_sorted_11    = c( "e11_5rep3",
-                                                  "e11_5rep4" ),
-                           time_sorted_12    = c( "e12_5rep4",
-                                                  "e12_5rep3" ),
-                           time_sorted_13    = c( "e13_5rep2",
-                                                  "e13_5rep3" ),
-                           time_sorted_16 = c("e16_5EpCAM_rep1",
-                                              "e16_5EpCAM_rep2") )
+                                      "P0_RightLobe") ) 
   
   RA_perturbation = list( FTOC_RA_RA   = c( "FTOC_RA_rep1", 
                                             "FTOC_RA_rep2", 
@@ -835,30 +800,7 @@ get_sample_groups = function(analyses = "whole_organ", combine = F){
                           FTOC_RA_BMS  = c( "FTOC_BMS493_rep1",
                                             "FTOC_BMS493_rep2",
                                             "FTOC_BMS493_rep3" ) )
-  
-  in_vitro = list( optimization = c( "NoRNaseInh",
-                                     "NoRNaseInh_1hour",
-                                     "RNaseInh",
-                                     "RNaseInh_1hour" ), 
-                   vitro_mouse = c( "P2lox40_ESC_Live_1",
-                                    "P2lox40_EPI_Live_1",
-                                    "P2lox40_DE_Live_1",
-                                    "P2lox40_6DPFE_Epcam",
-                                    "P2lox40_14DPFE_Epcam"),
-                   vitro_human = c( "hESC_rep2_seq2",
-                                    "hESC_rep3_seq2",
-                                    "hDE_H1_R",
-                                    "hDE_rep3_seq2",
-                                    "hAFE_rep1",
-                                    "hAFE_rep2_seq2",
-                                    "hPFE_rep2",
-                                    "hPFE_H1",
-                                    "hTEP_rep2",
-                                    "hTEP_H1",
-                                    "hTEPnew2_rep1",
-                                    "hTEPnew_rep1",
-                                    "hTEP_Control_H1LucGFP" ) )
-  
+
   # Avoid eight different `else if` thingies 
   if( combine ){
     merge_list_or_not = function( x ) return( Reduce( f = union, x = x ) )
@@ -869,53 +811,15 @@ get_sample_groups = function(analyses = "whole_organ", combine = F){
   # return the right thing
   if( identical( analyses, "whole_organ")) {
     return( merge_list_or_not( whole_organ ) )
-  } else if( identical(analyses, "sorted_timeseries" )){
-    return( merge_list_or_not( sorted_timeseries ) )
   } else if( identical( analyses, "RA_perturbation" ) ){
     return( merge_list_or_not( RA_perturbation ) )
-  } else if( identical( analyses, "in_vitro" ) ){
-    return( merge_list_or_not( sorted_timeseries ) )
   } else if( identical( analyses, "all" ) ){
-    return( merge_list_or_not( c(whole_organ, sorted_timeseries, in_vitro ) ) )
+    return( merge_list_or_not( c(whole_organ ) ) )
   } else {
-    to_return = c( whole_organ, sorted_timeseries, RA_perturbation, in_vitro ) [analyses]
+    to_return = c( whole_organ, RA_perturbation ) [analyses]
     if(length(to_return) == 0){ warning("No samples matched the analytic theme given.") }
     return( merge_list_or_not( to_return ) )
   }
-}
-
-# # This function returns a giant Seurat object containing the in-vivo versus in-vitro dataset.
-# # It has a metadata field cell_type that gives either eday (if in vivo) or e.g. "PFE_6", "DE".
-get_vivo_versus_vitro_data = function( results_path, test_mode = F, include_human = F ){
-  if( include_human ){
-    vivo_vs_vitro = get_sample_groups( c( "time_sorted_10_13", "vitro_mouse", "vitro_human" ), combine = T )
-    levels_in_order = c( "mESC", "mEPI", "mDE", "mPFE_6", "mPFE_14", 
-                         "10.5", "11.5", "12.5", "13.5", 
-                         "hESC", "hDE", "hAFE",  "hPFE", "hTEP")
-  } else {
-    vivo_vs_vitro = get_sample_groups( c( "time_sorted_10_13", "vitro_mouse" ), combine = T )
-    levels_in_order = c( "mESC", "mEPI", "mDE", "mPFE_6", "mPFE_14", 
-                         "10.5", "11.5", "12.5", "13.5" )
-  }
-  raw_dge = dge_merge_list( load_thymus_profiling_data( sample_ids = vivo_vs_vitro, test_mode = test_mode ) )
-  dge = seuratify_thy_data( raw_dge, results_path, test_mode = test_mode )
-  dge = add_maehrlab_metadata( dge )
-  dge = add_maehrlab_metadata( dge, variable_to_add = "source_tissue" )
-  dge = add_maehrlab_metadata( dge, variable_to_add = "species" )
-  
-  # # The next few lines assume that the only in vivo data is the mouse embryo data.
-  in_vivo_indicator = ( dge@data.info$source_tissue %in% c( "embryo" ) )
-  cell_type                      = as.character( dge@data.info$source_tissue )
-  cell_type[ in_vivo_indicator ] = as.character( dge@data.info$eday[ in_vivo_indicator ] )
-  names( cell_type ) =   rownames( dge@data.info )
-  dge = Seurat::AddMetaData( dge, metadata = cell_type, col.name = "cell_type")
-  dge@data.info$cell_type = factor(dge@data.info$cell_type, 
-                                   levels = levels_in_order,
-                                   ordered = T) 
-  if( include_human ){
-    dge = remove_species_specific_genes( dge, results_path = file.path( results_path, "QC" ) )
-  }
-  return(dge)
 }
 
 cross_platform_data_loader = function (sample_ids = "all", test_mode = F, lincRNA = F) {
@@ -940,6 +844,8 @@ cross_platform_data_loader = function (sample_ids = "all", test_mode = F, lincRN
   print("Result:")
   print(metadata[[ file_type_header ]])
   assertthat::are_equal(file_type_header, "dge_path")
+  
+  metadata[[ file_type_header ]] = file.path(dirname(get_metadata_path()), metadata[[ file_type_header ]])
   available = file.exists( metadata[[ file_type_header ]] ) 
   sample_ids = as.character( metadata[["Sample_ID"]] )
   unavailable_samples_str = paste0( sample_ids[!available], collapse = "\n" )
@@ -948,10 +854,9 @@ cross_platform_data_loader = function (sample_ids = "all", test_mode = F, lincRN
     warning( "\n Files unavailable for these samples: \n"); cat( unavailable_samples_str ); cat("\n")
   }
   metadata = metadata[ available, ]
-  runs_to_return = as.list( metadata[["Sample_ID"]] )
+  runs_to_return =  as.list(metadata[["Sample_ID"]]) 
   names( runs_to_return ) = runs_to_return
-  assertthat::are_equal(runs_to_return, sample_ids)
-  
+
   # # Fetch data
   for( i in seq_along( runs_to_return ) ){
     print( paste( "Loading dataset", metadata[i, "Sample_ID"] ) )
