@@ -2,9 +2,10 @@
 
 This folder contains scripts used for analysis of the data in our 2018 *Immunity* paper [(link)](https://www.ncbi.nlm.nih.gov/pubmed/29884461). 
 
-> Kernfeld EM, Genga RMJ, Neherin K, Magaletta ME, Xu P, Maehr R.
+> Genga RMJ†, Kernfeld EM†, Neherin K, Magaletta ME, Xu P, Maehr R.
 > A single-cell transcriptomic atlas of thymus organogenesis resolves cell types and developmental maturation. Immunity 2018.
-
+>
+> †Equal contribution
 
 ## Reproduction
 
